@@ -1,0 +1,176 @@
+name: Build APK
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: アプリ名
+        default: DataUsage
+      package_name:
+        description: パッケージ名（英小文字・数字・ドット）
+        default: app.hatent.datausage
+  push:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ inputs.app_name || 'データ通信量' }}
+      PKG: ${{ inputs.package_name || 'com.example.datausage' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: Generate project
+        run: |
+          D=app/src/main
+          mkdir -p $D/java/com/example/datausage $D/res/values $D/res/drawable $D/res/mipmap-anydpi-v26
+          cp K1.kt K2.kt K3.kt $D/java/com/example/datausage/
+          base64 -d > app/debug.keystore <<'EOF'
+          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
+          EOF
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "DataUsage"
+          include(":app")
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.20" apply false
+              id("org.jetbrains.kotlin.plugin.compose") version "2.0.20" apply false
+          }
+          EOF
+          echo "android.useAndroidX=true" > gradle.properties
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+              id("org.jetbrains.kotlin.plugin.compose")
+          }
+          android {
+              namespace = "com.example.datausage"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "PKG_HERE"
+                  minSdk = 29
+                  targetSdk = 34
+                  versionCode = 4
+                  versionName = "1.3"
+              }
+              signingConfigs {
+                  getByName("debug") {
+                      storeFile = file("debug.keystore")
+                      storePassword = "android"
+                      keyAlias = "androiddebugkey"
+                      keyPassword = "android"
+                  }
+              }
+              buildFeatures { compose = true }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.09.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.activity:activity-compose:1.9.2")
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+          }
+          EOF
+          sed -i "s/PKG_HERE/$PKG/" app/build.gradle.kts
+          cat > $D/res/values/strings.xml <<EOF
+          <resources>
+              <string name="app_name">$APP_NAME</string>
+              <string name="name2">通信モニター</string>
+              <string name="name3">Data Ring</string>
+              <string name="name4">Bolt</string>
+          </resources>
+          EOF
+          i=0
+          { echo "<resources>"
+            for c in 5B6CFF 0EA5A4 7C3AED F59E0B; do i=$((i+1)); echo "<color name=\"bg$i\">#$c</color>"; done
+            echo "</resources>"; } > $D/res/values/colors.xml
+          mkfg() { echo "<vector xmlns:android=\"http://schemas.android.com/apk/res/android\" android:width=\"108dp\" android:height=\"108dp\" android:viewportWidth=\"108\" android:viewportHeight=\"108\"><path android:fillColor=\"#FFFFFF\" $3 android:pathData=\"$2\"/></vector>" > $D/res/drawable/fg$1.xml; }
+          mkfg 1 "M32,72L42,72L42,58L32,58Z M49,72L59,72L59,46L49,46Z M66,72L76,72L76,34L66,34Z"
+          mkfg 2 "M38,32L46,32L46,58L54,58L42,72L30,58L38,58Z M62,76L70,76L70,50L78,50L66,36L54,50L62,50Z"
+          mkfg 3 "M54,54m-22,0a22,22 0 1,0 44,0a22,22 0 1,0 -44,0M54,54m-14,0a14,14 0 1,0 28,0a14,14 0 1,0 -28,0" 'android:fillType="evenOdd"'
+          mkfg 4 "M58,30L40,58L52,58L48,78L68,48L55,48Z"
+          for n in 1 2 3 4; do
+            printf '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android"><background android:drawable="@color/bg%s"/><foreground android:drawable="@drawable/fg%s"/></adaptive-icon>\n' $n $n > $D/res/mipmap-anydpi-v26/ic_$n.xml
+          done
+          {
+            echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">'
+            echo '<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>'
+            echo '<uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"/>'
+            echo '<application android:icon="@mipmap/ic_1" android:label="@string/app_name" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">'
+            echo '<activity android:name=".MainActivity" android:exported="true" android:icon="@mipmap/ic_1" android:label="@string/app_name"/>'
+            for n in 1 2 3 4; do
+              en=false; lab="@string/name$n"
+              if [ $n = 1 ]; then en=true; lab="@string/app_name"; fi
+              echo "<activity-alias android:name=\".Alias$n\" android:targetActivity=\".MainActivity\" android:exported=\"true\" android:enabled=\"$en\" android:icon=\"@mipmap/ic_$n\" android:label=\"$lab\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/><category android:name=\"android.intent.category.LAUNCHER\"/></intent-filter></activity-alias>"
+            done
+            echo '</application></manifest>'
+          } > $D/AndroidManifest.xml
+      - run: gradle assembleDebug --no-daemon
+      - name: APKの場所を確認
+        run: find app/build/outputs -name "*.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DataUsage-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - name: Releaseに公開
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" app/build/outputs/apk/debug/app-debug.apk \
+            --title "Build ${{ github.run_number }}" --notes "APK"
+# END
