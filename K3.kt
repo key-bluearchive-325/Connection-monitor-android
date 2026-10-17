@@ -67,12 +67,15 @@ fun UsageScreen() {
     var offset by remember { mutableIntStateOf(0) }
     var sortBy by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<AppUsage?>(null) }
     var data by remember { mutableStateOf(Loaded()) }
     var speed by remember { mutableStateOf(0L to 0L) }
     var batt by remember { mutableStateOf(readBattery(ctx)) }
     var tick by remember { mutableIntStateOf(0) }
 
-    BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showSettings || selected != null) {
+        if (selected != null) selected = null else showSettings = false
+    }
 
     // 履歴の保存（前日までを追記）
     LaunchedEffect(Unit) {
@@ -101,6 +104,8 @@ fun UsageScreen() {
     }
 
     if (showSettings) { SettingsScreen { showSettings = false }; return }
+    val sel = selected
+    if (sel != null) { AppDetailScreen(sel) { selected = null }; return }
 
     val sorted = if (sortBy == 0) data.apps.sortedByDescending { it.total }
     else data.apps.sortedByDescending { it.fgMs }
@@ -133,7 +138,7 @@ fun UsageScreen() {
         if (mode > 0 && data.days.isNotEmpty()) item { DayChart(data.days, mode) }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("アプリ別", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                Text("アプリ別（タップで詳細）", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 Pill(if (sortBy == 0) "通信量順" else "使用時間順", true) { sortBy = 1 - sortBy }
             }
         }
@@ -143,7 +148,7 @@ fun UsageScreen() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
             )
         }
-        items(sorted, key = { it.pkg }) { a -> AppRow(a, max) }
+        items(sorted, key = { it.pkg }) { a -> AppRow(a, max) { selected = a } }
     }
 }
 
@@ -264,9 +269,9 @@ fun DayChart(days: List<DayTotal>, mode: Int) {
 }
 
 @Composable
-fun AppRow(a: AppUsage, max: Float) {
+fun AppRow(a: AppUsage, max: Float, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Glass(Modifier.fillMaxWidth(), radius = 24.dp) {
+    Glass(Modifier.fillMaxWidth(), radius = 24.dp, onClick = onClick) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             if (a.icon != null) {
                 Image(a.icon, null, Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)))
@@ -311,4 +316,4 @@ fun AppRow(a: AppUsage, max: Float) {
         }
     }
 }
-// ENDz
+// END
