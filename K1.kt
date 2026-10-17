@@ -2,24 +2,27 @@ package com.example.datausage
 
 import android.app.Activity
 import android.app.AppOpsManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.drawable.Icon
 import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Process
-import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -28,12 +31,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import java.util.Locale
 
 const val NS = "com.example.datausage"
 val PRESET_LABELS = listOf("📶 データ通信量(標準)", "⇅ 通信モニター", "◯ Data Ring", "⚡ Bolt")
@@ -43,7 +44,7 @@ val MobileColor = Color(0xFFFFB74D)
 
 object Ui {
     var accent by mutableIntStateOf(0)
-    var mode by mutableIntStateOf(0) // 0=自動 1=ライト 2=ダーク
+    var mode by mutableIntStateOf(0) // 0=自動 1=ライト 2=ダーク 3=AMOLED
 }
 
 class MainActivity : ComponentActivity() {
@@ -59,11 +60,13 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
-    val dark = when (Ui.mode) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
+    val amoled = Ui.mode == 3
+    val dark = amoled || when (Ui.mode) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
     val ac = Color(ACCENTS[Ui.accent])
     val cs = if (dark) darkColorScheme(
         primary = ac, onPrimary = Color.White,
-        background = Color(0xFF0B0D14), surface = Color(0xFF171B24),
+        background = if (amoled) Color.Black else Color(0xFF0B0D14),
+        surface = if (amoled) Color.Black else Color(0xFF171B24),
         onBackground = Color(0xFFF1F3F9), onSurface = Color(0xFFF1F3F9),
         onSurfaceVariant = Color(0xFFB4BBCC), surfaceVariant = Color(0x1FFFFFFF)
     ) else lightColorScheme(
@@ -75,18 +78,19 @@ fun AppTheme(content: @Composable () -> Unit) {
     val n = ACCENTS.size
     val blobs = listOf(ac, Color(ACCENTS[(Ui.accent + 2) % n]), Color(ACCENTS[(Ui.accent + 4) % n]))
     MaterialTheme(colorScheme = cs) {
-        GlassBackground(dark, blobs) {
+        GlassBackground(dark, amoled, blobs) {
             Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = cs.onSurface, content = content)
         }
     }
 }
 
 @Composable
-fun GlassBackground(dark: Boolean, blobs: List<Color>, content: @Composable () -> Unit) {
+fun GlassBackground(dark: Boolean, amoled: Boolean, blobs: List<Color>, content: @Composable () -> Unit) {
     Box(
         Modifier.fillMaxSize()
-            .background(if (dark) Color(0xFF0B0D14) else Color(0xFFEEF1FA))
+            .background(if (amoled) Color.Black else if (dark) Color(0xFF0B0D14) else Color(0xFFEEF1FA))
             .drawBehind {
+                if (amoled) return@drawBehind
                 val a = if (dark) 0.50f else 0.42f
                 val w = size.width
                 val h = size.height
@@ -102,7 +106,13 @@ fun GlassBackground(dark: Boolean, blobs: List<Color>, content: @Composable () -
 }
 
 @Composable
-fun Glass(modifier: Modifier = Modifier, radius: Dp = 28.dp, content: @Composable () -> Unit) {
+fun Glass(
+    modifier: Modifier = Modifier,
+    radius: Dp = 28.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
+    val amoled = Ui.mode == 3
     val dark = MaterialTheme.colorScheme.onSurface.luminance() > 0.5f
     val shape = RoundedCornerShape(radius)
     val rim = Brush.linearGradient(
@@ -113,13 +123,14 @@ fun Glass(modifier: Modifier = Modifier, radius: Dp = 28.dp, content: @Composabl
         )
     )
     val sheen = Brush.verticalGradient(
-        listOf(Color.White.copy(alpha = if (dark) 0.14f else 0.45f), Color.Transparent)
+        listOf(Color.White.copy(alpha = if (amoled) 0.07f else if (dark) 0.14f else 0.45f), Color.Transparent)
     )
     Box(
         modifier.clip(shape)
-            .background(Color.White.copy(alpha = if (dark) 0.07f else 0.40f))
+            .background(Color.White.copy(alpha = if (amoled) 0.06f else if (dark) 0.07f else 0.40f))
             .background(sheen)
             .border(1.dp, rim, shape)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
     ) { content() }
 }
 
@@ -180,11 +191,12 @@ fun hasUsageAccess(ctx: Context): Boolean {
     ) == AppOpsManager.MODE_ALLOWED
 }
 
+/** 小数点2桁（例: 4.54MB） */
 fun fmt(b: Long): String = when {
-    b >= 1L shl 30 -> "%.2f GB".format(b / (1L shl 30).toDouble())
-    b >= 1L shl 20 -> "%.1f MB".format(b / (1L shl 20).toDouble())
-    b >= 1L shl 10 -> "%.0f KB".format(b / 1024.0)
-    else -> "$b B"
+    b >= 1L shl 30 -> String.format(Locale.US, "%.2fGB", b / (1L shl 30).toDouble())
+    b >= 1L shl 20 -> String.format(Locale.US, "%.2fMB", b / (1L shl 20).toDouble())
+    b >= 1L shl 10 -> String.format(Locale.US, "%.2fKB", b / 1024.0)
+    else -> "${b}B"
 }
 
 fun fmtTime(ms: Long): String {
@@ -197,147 +209,48 @@ fun fmtTime(ms: Long): String {
     }
 }
 
-@Composable
-fun GSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Glass(Modifier.fillMaxWidth(), radius = 24.dp) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            content()
-        }
+// ---------- 120Hz / アイコン / ショートカット ----------
+@Suppress("DEPRECATION")
+fun applyRefreshRate(act: Activity, enabled: Boolean) {
+    val d = act.windowManager.defaultDisplay
+    val cur = d.mode
+    val best = d.supportedModes
+        .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+        .maxByOrNull { it.refreshRate } ?: return
+    val lp = act.window.attributes
+    lp.preferredDisplayModeId = if (enabled) best.modeId else 0
+    lp.preferredRefreshRate = if (enabled) best.refreshRate else 0f
+    act.window.attributes = lp
+}
+
+fun setLauncherPreset(ctx: Context, sel: Int) {
+    val pm = ctx.packageManager
+    fun cn(i: Int) = ComponentName(ctx.packageName, "$NS.Alias${i + 1}")
+    pm.setComponentEnabledSetting(cn(sel), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+    PRESET_LABELS.indices.filter { it != sel }.forEach {
+        pm.setComponentEnabledSetting(cn(it), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
     }
 }
 
-@Composable
-fun SettingsScreen(onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    val cs = MaterialTheme.colorScheme
-    val prefs = remember { ctx.getSharedPreferences("s", 0) }
-    var hz by remember { mutableStateOf(prefs.getBoolean("hz", true)) }
-    var preset by remember { mutableIntStateOf(prefs.getInt("preset", 0)) }
-    var name by remember { mutableStateOf("") }
-    var emoji by remember { mutableStateOf("📶") }
-    var scIdx by remember { mutableIntStateOf(0) }
-    var histDays by remember { mutableIntStateOf(History.days(ctx)) }
-    val scColors = ACCENTS + 0xFF111111L
-    BackHandler { onBack() }
-
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("◀ 戻る") }
-                Spacer(Modifier.width(8.dp))
-                Text("設定", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        item {
-            GSection("テーマ") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("自動", "ライト", "ダーク").forEachIndexed { i, s ->
-                        Pill(s, Ui.mode == i) {
-                            Ui.mode = i
-                            prefs.edit().putInt("mode", i).apply()
-                        }
-                    }
-                }
-                Text("アクセントカラー", fontSize = 12.sp, color = cs.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ACCENTS.forEachIndexed { i, c ->
-                        Box(
-                            Modifier.size(38.dp).clip(CircleShape).background(Color(c))
-                                .then(if (Ui.accent == i) Modifier.border(3.dp, cs.onSurface, CircleShape) else Modifier)
-                                .clickable {
-                                    Ui.accent = i
-                                    prefs.edit().putInt("accent", i).apply()
-                                }
-                        )
-                    }
-                }
-            }
-        }
-        item {
-            GSection("表示") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("高リフレッシュレート（最大120Hz）")
-                        Text(
-                            "対応端末でスクロールが滑らかになります。バッテリー消費は少し増えます。",
-                            fontSize = 12.sp, color = cs.onSurfaceVariant
-                        )
-                    }
-                    Switch(checked = hz, onCheckedChange = { v ->
-                        hz = v
-                        prefs.edit().putBoolean("hz", v).apply()
-                        (ctx as? Activity)?.let { a -> applyRefreshRate(a, v) }
-                    })
-                }
-            }
-        }
-        item {
-            GSection("履歴の保存") {
-                Text(
-                    "毎日の通信量をこの端末内に自動保存します（アプリを開いたときに前日までを追加）。保存済み: ${histDays}日分",
-                    fontSize = 13.sp, color = cs.onSurfaceVariant
-                )
-                Button(onClick = {
-                    History.clear(ctx)
-                    histDays = 0
-                    Toast.makeText(ctx, "消去しました。次回起動時にOSの履歴から再取得します", Toast.LENGTH_SHORT).show()
-                }) { Text("保存データを消去") }
-            }
-        }
-        item {
-            GSection("ホーム画面のアイコンと名前（プリセット）") {
-                PRESET_LABELS.forEachIndexed { i, label ->
-                    val select = {
-                        preset = i
-                        prefs.edit().putInt("preset", i).apply()
-                        setLauncherPreset(ctx, i)
-                        Toast.makeText(ctx, "反映まで数秒〜数十秒かかります", Toast.LENGTH_SHORT).show()
-                    }
-                    Row(Modifier.fillMaxWidth().clickable { select() }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = preset == i, onClick = { select() })
-                        Text(label)
-                    }
-                }
-            }
-        }
-        item {
-            GSection("好きな名前・アイコンでホーム画面に追加") {
-                OutlinedTextField(
-                    value = name, onValueChange = { name = it },
-                    label = { Text("アプリ名") }, singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = emoji, onValueChange = { emoji = it.take(4) },
-                    label = { Text("アイコンの絵文字") }, singleLine = true, modifier = Modifier.fillMaxWidth()
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    scColors.forEachIndexed { i, c ->
-                        Box(
-                            Modifier.size(32.dp).clip(CircleShape).background(Color(c))
-                                .then(if (scIdx == i) Modifier.border(3.dp, cs.onSurface, CircleShape) else Modifier)
-                                .clickable { scIdx = i }
-                        )
-                    }
-                }
-                Button(onClick = {
-                    val ok = pinShortcut(ctx, name, emoji, Color(scColors[scIdx]).toArgb())
-                    Toast.makeText(ctx, if (ok) "追加の確認画面で許可してください" else "このホーム画面は非対応です", Toast.LENGTH_SHORT).show()
-                }) { Text("ホーム画面に追加") }
-            }
-        }
-        item {
-            GSection("パッケージ名") {
-                Text(
-                    "アプリ内からは変更できません。GitHub の Actions → Build APK → Run workflow で、アプリ名とパッケージ名を入力してビルドし直してください（別のアプリとしてインストールされ、保存した履歴も別になります）。",
-                    fontSize = 13.sp, color = cs.onSurfaceVariant
-                )
-            }
-        }
-    }
+fun pinShortcut(ctx: Context, name: String, emoji: String, bg: Int): Boolean {
+    val sm = ctx.getSystemService(ShortcutManager::class.java)
+    if (!sm.isRequestPinShortcutSupported) return false
+    val bmp = Bitmap.createBitmap(192, 192, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = bg
+    c.drawRoundRect(0f, 0f, 192f, 192f, 48f, 48f, p)
+    p.color = 0xFFFFFFFF.toInt()
+    p.textSize = 104f
+    p.textAlign = Paint.Align.CENTER
+    val y = 96f - (p.descent() + p.ascent()) / 2
+    c.drawText(emoji.ifBlank { "📶" }, 96f, y, p)
+    val intent = Intent(ctx, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
+    val info = ShortcutInfo.Builder(ctx, "c${System.currentTimeMillis()}")
+        .setShortLabel(name.ifBlank { "通信量" })
+        .setIcon(Icon.createWithBitmap(bmp))
+        .setIntent(intent)
+        .build()
+    return sm.requestPinShortcut(info, null)
 }
 // END
