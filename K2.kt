@@ -1,19 +1,9 @@
 package com.example.datausage
 
-import android.app.Activity
 import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.app.usage.UsageStatsManager
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.pm.ShortcutInfo
-import android.content.pm.ShortcutManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.drawable.Icon
 import android.net.ConnectivityManager
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -25,51 +15,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-
-// ---------- 120Hz / アイコン / ショートカット ----------
-@Suppress("DEPRECATION")
-fun applyRefreshRate(act: Activity, enabled: Boolean) {
-    val d = act.windowManager.defaultDisplay
-    val cur = d.mode
-    val best = d.supportedModes
-        .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
-        .maxByOrNull { it.refreshRate } ?: return
-    val lp = act.window.attributes
-    lp.preferredDisplayModeId = if (enabled) best.modeId else 0
-    lp.preferredRefreshRate = if (enabled) best.refreshRate else 0f
-    act.window.attributes = lp
-}
-
-fun setLauncherPreset(ctx: Context, sel: Int) {
-    val pm = ctx.packageManager
-    fun cn(i: Int) = ComponentName(ctx.packageName, "$NS.Alias${i + 1}")
-    pm.setComponentEnabledSetting(cn(sel), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
-    PRESET_LABELS.indices.filter { it != sel }.forEach {
-        pm.setComponentEnabledSetting(cn(it), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
-    }
-}
-
-fun pinShortcut(ctx: Context, name: String, emoji: String, bg: Int): Boolean {
-    val sm = ctx.getSystemService(ShortcutManager::class.java)
-    if (!sm.isRequestPinShortcutSupported) return false
-    val bmp = Bitmap.createBitmap(192, 192, Bitmap.Config.ARGB_8888)
-    val c = Canvas(bmp)
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.color = bg
-    c.drawRoundRect(0f, 0f, 192f, 192f, 48f, 48f, p)
-    p.color = 0xFFFFFFFF.toInt()
-    p.textSize = 104f
-    p.textAlign = Paint.Align.CENTER
-    val y = 96f - (p.descent() + p.ascent()) / 2
-    c.drawText(emoji.ifBlank { "📶" }, 96f, y, p)
-    val intent = Intent(ctx, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
-    val info = ShortcutInfo.Builder(ctx, "c${System.currentTimeMillis()}")
-        .setShortLabel(name.ifBlank { "通信量" })
-        .setIcon(Icon.createWithBitmap(bmp))
-        .setIntent(intent)
-        .build()
-    return sm.requestPinShortcut(info, null)
-}
 
 // ---------- 日付ヘルパー ----------
 fun startOfDay(ms: Long): Long = Calendar.getInstance().apply {
@@ -237,18 +182,19 @@ object History {
     }
 }
 
-/** 各日のデータ。保存済みを優先し、無ければOSから取得（fallback=true時） */
+/** 各日のデータ。保存済みを優先し、未保存ならOSから取得（fallback=true時） */
 fun dayMaps(ctx: Context, start: Long, end: Long, fallback: Boolean): List<Pair<Long, Map<String, LongArray>>> {
     val out = ArrayList<Pair<Long, Map<String, LongArray>>>()
     val now = System.currentTimeMillis()
     val today = startOfDay(now)
+    val synced = ctx.getSharedPreferences("s", 0).getLong("lastSync", 0L)
     var cur = start
     while (cur < end) {
         val next = addDays(cur, 1)
         val m: Map<String, LongArray> =
             if (cur >= today) queryDay(ctx, cur, minOf(next, now), true)
             else History.all(ctx)[dayKey(cur)]
-                ?: if (fallback) queryDay(ctx, cur, next, cur >= addDays(today, -6)) else emptyMap()
+                ?: if (fallback && cur >= synced) queryDay(ctx, cur, next, cur >= addDays(today, -6)) else emptyMap()
         out.add(cur to m)
         cur = next
     }
@@ -293,5 +239,26 @@ fun loadAll(ctx: Context, mode: Int, offset: Int): Loaded {
         if (i >= r.size - 7) { w7 += w; m7 += mo }
     }
     return Loaded(apps, chart, Roll(w7, m7, w30, m30))
+}
+
+// ---------- アプリ詳細用 ----------
+data class DayRow(val ms: Long, val label: String, val wifi: Long, val mobile: Long, val fgMs: Long)
+data class Detail(val rows: List<DayRow>, val savedWifi: Long, val savedMobile: Long)
+
+fun loadDetail(ctx: Context, pkg: String, n: Int): Detail {
+    val now = System.currentTimeMillis()
+    val start = addDays(startOfDay(now), -(n - 1))
+    val f = SimpleDateFormat("M/d(E)", Locale.JAPAN)
+    val rows = dayMaps(ctx, start, now, true).map { (ms, m) ->
+        val a = m[pkg]
+        DayRow(ms, f.format(Date(ms)), a?.get(0) ?: 0L, a?.get(1) ?: 0L, a?.get(2) ?: 0L)
+    }
+    var sw = 0L
+    var sm = 0L
+    for (m in History.all(ctx).values) {
+        val a = m[pkg]
+        if (a != null) { sw += a[0]; sm += a[1] }
+    }
+    return Detail(rows, sw, sm)
 }
 // END
