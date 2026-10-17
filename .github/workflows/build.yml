@@ -30,7 +30,7 @@ jobs:
         run: |
           D=app/src/main
           mkdir -p $D/java/com/example/datausage $D/res/values $D/res/drawable $D/res/mipmap-anydpi-v26
-          cp K1.kt K2.kt K3.kt $D/java/com/example/datausage/
+          cp K1.kt K2.kt K3.kt K4.kt $D/java/com/example/datausage/
           base64 -d > app/debug.keystore <<'EOF'
           /u3+7QAAAAIAAAABAAAAAQAPYW5kcm9pZGRlYnVna2V5AAABoUqw2ToAAAT+MIIE+jAMBgorBgEE
           ASoCEQEBBIIE6PlAOMhC1HMWhwcrrQT8E6zLIcVo4fGojrWYQjlxXAyNSPTisFQ7HSV5l0PLj9RP
@@ -98,8 +98,8 @@ jobs:
                   applicationId = "PKG_HERE"
                   minSdk = 29
                   targetSdk = 34
-                  versionCode = 4
-                  versionName = "1.3"
+                  versionCode = 5
+                  versionName = "1.4"
               }
               signingConfigs {
                   getByName("debug") {
