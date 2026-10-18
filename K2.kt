@@ -11,8 +11,6 @@ import androidx.core.graphics.drawable.toBitmap
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -55,16 +53,18 @@ fun rangeOf(mode: Int, offset: Int): Pair<Long, Long> {
 }
 
 fun periodLabel(mode: Int, offset: Int): String {
+    val ja = isJa()
+    val loc = appLocale()
     val c = Calendar.getInstance().apply { timeInMillis = rangeOf(mode, offset).first }
     return when (mode) {
-        0 -> SimpleDateFormat("M月d日(E)", Locale.JAPAN).format(c.time)
+        0 -> SimpleDateFormat(if (ja) "M月d日(E)" else "EEE d MMM yyyy", loc).format(c.time)
         1 -> {
-            val f = SimpleDateFormat("M/d", Locale.JAPAN)
+            val f = SimpleDateFormat(if (ja) "M/d" else "d MMM", loc)
             val st = f.format(c.time)
             c.add(Calendar.DAY_OF_YEAR, 6)
-            "$st 〜 ${f.format(c.time)}"
+            if (ja) "$st 〜 ${f.format(c.time)}" else "$st – ${f.format(c.time)}"
         }
-        else -> SimpleDateFormat("yyyy年M月", Locale.JAPAN).format(c.time)
+        else -> SimpleDateFormat(if (ja) "yyyy年M月" else "MMMM yyyy", loc).format(c.time)
     }
 }
 
@@ -206,24 +206,21 @@ fun loadAll(ctx: Context, mode: Int, offset: Int): Loaded {
     val pm = ctx.packageManager
     val byPkg = HashMap<String, LongArray>()
     val chart = ArrayList<DayTotal>()
-    val wf = SimpleDateFormat("E", Locale.JAPAN)
     for ((ds, m) in dayMaps(ctx, start, end, true)) {
         var w = 0L
         var mo = 0L
         for ((pkg, a) in m) {
-            val t = byPkg.getOrPut(pkg) { LongArray(3) }
-            t[0] += a[0]; t[1] += a[1]; t[2] += a[2]
+            val acc = byPkg.getOrPut(pkg) { LongArray(3) }
+            acc[0] += a[0]; acc[1] += a[1]; acc[2] += a[2]
             w += a[0]; mo += a[1]
         }
-        val label = if (mode == 1) wf.format(Date(ds))
-        else Calendar.getInstance().apply { timeInMillis = ds }.get(Calendar.DAY_OF_MONTH).toString()
-        chart.add(DayTotal(label, w, mo))
+        chart.add(DayTotal(ds, w, mo))
     }
     val apps = byPkg.mapNotNull { (pkg, a) ->
         if (a.all { it == 0L }) return@mapNotNull null
         val label = runCatching {
             pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-        }.getOrNull() ?: if (pkg.startsWith("uid:")) "システム/その他 ($pkg)" else pkg
+        }.getOrNull() ?: pkg
         AppUsage(label, pkg, a[0], a[1], a[2], iconOf(ctx, pkg))
     }
 
@@ -242,16 +239,15 @@ fun loadAll(ctx: Context, mode: Int, offset: Int): Loaded {
 }
 
 // ---------- アプリ詳細用 ----------
-data class DayRow(val ms: Long, val label: String, val wifi: Long, val mobile: Long, val fgMs: Long)
+data class DayRow(val ms: Long, val wifi: Long, val mobile: Long, val fgMs: Long)
 data class Detail(val rows: List<DayRow>, val savedWifi: Long, val savedMobile: Long)
 
 fun loadDetail(ctx: Context, pkg: String, n: Int): Detail {
     val now = System.currentTimeMillis()
     val start = addDays(startOfDay(now), -(n - 1))
-    val f = SimpleDateFormat("M/d(E)", Locale.JAPAN)
     val rows = dayMaps(ctx, start, now, true).map { (ms, m) ->
         val a = m[pkg]
-        DayRow(ms, f.format(Date(ms)), a?.get(0) ?: 0L, a?.get(1) ?: 0L, a?.get(2) ?: 0L)
+        DayRow(ms, a?.get(0) ?: 0L, a?.get(1) ?: 0L, a?.get(2) ?: 0L)
     }
     var sw = 0L
     var sm = 0L
