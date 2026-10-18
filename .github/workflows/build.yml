@@ -4,10 +4,10 @@ on:
     inputs:
       app_name:
         description: アプリ名
-        default: データ通信量
+        default: DataUsageViewer
       package_name:
         description: パッケージ名（英小文字・数字・ドット）
-        default: com.example.datausage
+        default: app.hatent.dsv
   push:
 permissions:
   contents: write
@@ -15,8 +15,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      APP_NAME: ${{ inputs.app_name || 'データ通信量' }}
-      PKG: ${{ inputs.package_name || 'com.example.datausage' }}
+      APP_NAME: ${{ inputs.app_name || 'DataUsageViewer' }}
+      PKG: ${{ inputs.package_name || 'app.hatent.dsv' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -29,7 +29,7 @@ jobs:
       - name: Generate project
         run: |
           D=app/src/main
-          mkdir -p $D/java/com/example/datausage $D/res/values $D/res/drawable $D/res/mipmap-anydpi-v26
+          mkdir -p $D/java/com/example/datausage $D/res/values $D/res/values-en $D/res/drawable $D/res/mipmap-anydpi-v26
           cp K1.kt K2.kt K3.kt K4.kt K5.kt $D/java/com/example/datausage/
           base64 -d > app/debug.keystore <<'EOF'
           /u3+7QAAAAIAAAABAAAAAQAPYW5kcm9pZGRlYnVna2V5AAABoUqw2ToAAAT+MIIE+jAMBgorBgEE
@@ -98,8 +98,8 @@ jobs:
                   applicationId = "PKG_HERE"
                   minSdk = 29
                   targetSdk = 34
-                  versionCode = 6
-                  versionName = "1.5"
+                  versionCode = 7
+                  versionName = "1.6"
               }
               signingConfigs {
                   getByName("debug") {
@@ -136,6 +136,11 @@ jobs:
               <string name="name4">Bolt</string>
           </resources>
           EOF
+          cat > $D/res/values-en/strings.xml <<EOF
+          <resources>
+              <string name="name2">Traffic Monitor</string>
+          </resources>
+          EOF
           i=0
           { echo "<resources>"
             for c in 5B6CFF 0EA5A4 7C3AED F59E0B; do i=$((i+1)); echo "<color name=\"bg$i\">#$c</color>"; done
@@ -157,7 +162,7 @@ jobs:
             echo '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'
             echo '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>'
             echo '<application android:icon="@mipmap/ic_1" android:label="@string/app_name" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">'
-            echo '<activity android:name=".MainActivity" android:exported="true" android:icon="@mipmap/ic_1" android:label="@string/app_name"/>'
+            echo '<activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize" android:icon="@mipmap/ic_1" android:label="@string/app_name"/>'
             for n in 1 2 3 4; do
               en=false; lab="@string/name$n"
               if [ $n = 1 ]; then en=true; lab="@string/app_name"; fi
