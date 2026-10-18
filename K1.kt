@@ -20,8 +20,6 @@ import android.os.Process
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -42,10 +40,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import java.util.Locale
 
 const val NS = "com.example.datausage"
-val PRESET_LABELS = listOf("📶 データ通信量(標準)", "⇅ 通信モニター", "◯ Data Ring", "⚡ Bolt")
+const val PRESET_COUNT = 4
 val ACCENTS = listOf(0xFF5B6CFFL, 0xFF9B5CFFL, 0xFF0EA5A4L, 0xFFE5484DL, 0xFFF59E0BL, 0xFF30A46CL)
 val WifiColor = Color(0xFF4FC3F7)
 val MobileColor = Color(0xFFFFB74D)
@@ -55,7 +54,26 @@ object Ui {
     var mode by mutableIntStateOf(0)    // 0=自動 1=ライト 2=ダーク 3=AMOLED
     var palette by mutableIntStateOf(0) // 0=標準 1=Material You 2=モノクロ
     var mult by mutableFloatStateOf(1f) // 速度表示の倍率（見かけだけ）
+    var lang by mutableIntStateOf(0)    // 0=自動 1=日本語 2=English (UK)
 }
+
+fun isJa(): Boolean = when (Ui.lang) {
+    1 -> true
+    2 -> false
+    else -> Locale.getDefault().language == "ja"
+}
+
+/** 日本語 / 英語（イギリス英語）の切り替え */
+fun tl(ja: String, en: String): String = if (isJa()) ja else en
+
+fun appLocale(): Locale = if (isJa()) Locale.JAPAN else Locale.UK
+
+fun presetLabels(): List<String> = listOf(
+    tl("📶 DataUsageViewer（標準）", "📶 DataUsageViewer (default)"),
+    tl("⇅ 通信モニター", "⇅ Traffic Monitor"),
+    "◯ Data Ring",
+    "⚡ Bolt"
+)
 
 data class Pal(
     val ac: Color, val ac2: Color,
@@ -75,13 +93,21 @@ val LocalPal = compositionLocalOf {
 }
 
 class MainActivity : ComponentActivity() {
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 時計・通知アイコンの領域（ステータスバー）まで画面を表示
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+
         val p = getSharedPreferences("s", 0)
         Ui.accent = p.getInt("accent", 0).coerceIn(0, ACCENTS.size - 1)
         Ui.mode = p.getInt("mode", 0)
         Ui.palette = p.getInt("palette", 0)
         Ui.mult = p.getFloat("mult", 1f)
+        Ui.lang = p.getInt("lang", 0)
         applyRefreshRate(this, p.getBoolean("hz", true))
         if (p.getBoolean("notif", false)) {
             runCatching { startForegroundService(Intent(this, SpeedService::class.java)) }
@@ -160,6 +186,16 @@ fun AppTheme(content: @Composable () -> Unit) {
         }
     }
 
+    // ステータスバー／ナビゲーションバーのアイコン色をテーマに合わせる
+    SideEffect {
+        val w = (ctx as? Activity)?.window
+        if (w != null) {
+            val c = WindowCompat.getInsetsController(w, w.decorView)
+            c.isAppearanceLightStatusBars = !dark
+            c.isAppearanceLightNavigationBars = !dark
+        }
+    }
+
     MaterialTheme(colorScheme = cs) {
         CompositionLocalProvider(LocalPal provides pal) {
             GlassBackground(dark, amoled, cs.background, pal.blobs) {
@@ -188,6 +224,13 @@ fun GlassBackground(dark: Boolean, amoled: Boolean, base: Color, blobs: List<Col
                 blob(blobs[2], w * 0.1f, h * 0.9f, w * 0.95f)
             }
     ) { content() }
+}
+
+/** 画面の上下（時計・ナビゲーションバー）に被らないための余白 */
+@Composable
+fun pagePadding(): PaddingValues {
+    val sd = WindowInsets.safeDrawing.asPaddingValues()
+    return PaddingValues(16.dp, sd.calculateTopPadding() + 16.dp, 16.dp, sd.calculateBottomPadding() + 16.dp)
 }
 
 @Composable
@@ -237,9 +280,21 @@ fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
             .background(bg)
             .border(1.dp, Color.White.copy(alpha = if (dark) 0.25f else 0.8f), shape)
             .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
         Text(text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, color = fg)
+    }
+}
+
+/** 選択肢のボタンを折り返して並べる */
+@Composable
+fun PillRows(labels: List<String>, sel: Int, perRow: Int, onSel: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        labels.indices.chunked(perRow).forEach { idxs ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                idxs.forEach { i -> Pill(labels[i], sel == i) { onSel(i) } }
+            }
+        }
     }
 }
 
@@ -259,9 +314,11 @@ data class AppUsage(
     val icon: ImageBitmap?
 ) {
     val total get() = wifi + mobile
+    val shownLabel: String
+        get() = if (pkg.startsWith("uid:")) tl("システム/その他 ($pkg)", "System / other ($pkg)") else label
 }
 
-data class DayTotal(val label: String, val wifi: Long, val mobile: Long)
+data class DayTotal(val ms: Long, val wifi: Long, val mobile: Long)
 data class Roll(val w7: Long = 0, val m7: Long = 0, val w30: Long = 0, val m30: Long = 0)
 data class Loaded(
     val apps: List<AppUsage> = emptyList(),
@@ -275,11 +332,11 @@ fun readBattery(ctx: Context): Batt {
     val lv = i?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
     val sc = i?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
     val st = i?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-    val t = i?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+    val temp = i?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
     return Batt(
         if (lv < 0) 0 else lv * 100 / sc,
         st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL,
-        t / 10f
+        temp / 10f
     )
 }
 
@@ -302,19 +359,12 @@ fun fmt(b: Long): String = fmtD(b.toDouble())
 
 fun multLabel(m: Float): String = if (m >= 1f) m.toInt().toString() else m.toString()
 
-/** 数字をなめらかに動かす */
-@Composable
-fun animBytes(v: Double): Double {
-    val a by animateFloatAsState(v.toFloat(), tween(600, easing = FastOutSlowInEasing), label = "num")
-    return a.toDouble()
-}
-
 fun fmtTime(ms: Long): String {
     val m = ms / 60000
     return when {
-        m >= 60 -> "${m / 60}時間${m % 60}分"
-        m >= 1 -> "${m}分"
-        ms > 0 -> "1分未満"
+        m >= 60 -> tl("${m / 60}時間${m % 60}分", "${m / 60}h ${m % 60}m")
+        m >= 1 -> tl("${m}分", "$m min")
+        ms > 0 -> tl("1分未満", "<1 min")
         else -> "-"
     }
 }
@@ -337,7 +387,7 @@ fun setLauncherPreset(ctx: Context, sel: Int) {
     val pm = ctx.packageManager
     fun cn(i: Int) = ComponentName(ctx.packageName, "$NS.Alias${i + 1}")
     pm.setComponentEnabledSetting(cn(sel), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
-    PRESET_LABELS.indices.filter { it != sel }.forEach {
+    (0 until PRESET_COUNT).filter { it != sel }.forEach {
         pm.setComponentEnabledSetting(cn(it), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
     }
 }
@@ -357,7 +407,7 @@ fun pinShortcut(ctx: Context, name: String, emoji: String, bg: Int): Boolean {
     c.drawText(emoji.ifBlank { "📶" }, 96f, y, p)
     val intent = Intent(ctx, MainActivity::class.java).setAction(Intent.ACTION_MAIN)
     val info = ShortcutInfo.Builder(ctx, "c${System.currentTimeMillis()}")
-        .setShortLabel(name.ifBlank { "通信量" })
+        .setShortLabel(name.ifBlank { tl("通信量", "Data usage") })
         .setIcon(Icon.createWithBitmap(bmp))
         .setIntent(intent)
         .build()
