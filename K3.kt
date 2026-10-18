@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
 
 @Composable
 fun Root() {
@@ -41,16 +43,22 @@ fun Root() {
     }
     if (granted) UsageScreen() else {
         Column(
-            Modifier.fillMaxSize().padding(32.dp),
+            Modifier.fillMaxSize().safeDrawingPadding().padding(32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("📶", fontSize = 56.sp)
             Spacer(Modifier.height(16.dp))
-            Text("使用状況へのアクセスを許可してください", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(
+                tl("使用状況へのアクセスを許可してください", "Please allow usage access"),
+                fontSize = 18.sp, fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(8.dp))
             Text(
-                "通信量と画面使用時間の取得に必要です。設定でこのアプリをオンにしてください。",
+                tl(
+                    "通信量と画面使用時間の取得に必要です。設定でこのアプリをオンにしてください。",
+                    "This is needed to read data usage and screen time. Turn this app on in Settings."
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(24.dp))
@@ -58,7 +66,7 @@ fun Root() {
                 ctx.startActivity(
                     Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
-            }) { Text("設定を開く") }
+            }) { Text(tl("設定を開く", "Open settings")) }
         }
     }
 }
@@ -101,10 +109,10 @@ fun UsageScreen() {
         var tx = TrafficStats.getTotalTxBytes()
         while (true) {
             delay(1000)
-            val r = TrafficStats.getTotalRxBytes()
-            val t = TrafficStats.getTotalTxBytes()
-            speed = (r - rx).coerceAtLeast(0L) to (t - tx).coerceAtLeast(0L)
-            rx = r; tx = t
+            val nr = TrafficStats.getTotalRxBytes()
+            val nt = TrafficStats.getTotalTxBytes()
+            speed = (nr - rx).coerceAtLeast(0L) to (nt - tx).coerceAtLeast(0L)
+            rx = nr; tx = nt
         }
     }
 
@@ -165,14 +173,16 @@ fun MainList(
             ) { _, d -> total += d }
         },
         state = state,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = pagePadding(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item { Header(speed, data.apps, batt, onSettings) }
         item { SummaryCard(data.roll) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("日", "週", "月").forEachIndexed { i, s -> Pill(s, mode == i) { onMode(i) } }
+                listOf(tl("日", "Day"), tl("週", "Week"), tl("月", "Month")).forEachIndexed { i, s ->
+                    Pill(s, mode == i) { onMode(i) }
+                }
             }
         }
         item {
@@ -203,13 +213,22 @@ fun MainList(
         if (mode > 0 && data.days.isNotEmpty()) item { DayChart(data.days, mode) }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("アプリ別（タップで詳細）", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Pill(if (sortBy == 0) "通信量順" else "使用時間順", true) { onSort() }
+                Text(
+                    tl("アプリ別（タップで詳細）", "By app (tap for details)"),
+                    fontWeight = FontWeight.SemiBold, fontSize = 15.sp
+                )
+                Pill(
+                    if (sortBy == 0) tl("通信量順", "By data") else tl("使用時間順", "By screen time"),
+                    true
+                ) { onSort() }
             }
         }
         if (sorted.isEmpty()) item {
             Text(
-                "この期間のデータがありません（OSが保持している期間より前の可能性があります）",
+                tl(
+                    "この期間のデータがありません（OSが保持している期間より前の可能性があります）",
+                    "No data for this period (it may be older than what Android keeps)."
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
             )
         }
@@ -233,11 +252,6 @@ fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings
     val fg = pal.onHdr
     val shape = RoundedCornerShape(32.dp)
     val m = Ui.mult.toDouble()
-    val down = animBytes(speed.first * m)
-    val up = animBytes(speed.second * m)
-    val tot = animBytes(list.sumOf { it.total }.toDouble())
-    val tw = animBytes(list.sumOf { it.wifi }.toDouble())
-    val tm = animBytes(list.sumOf { it.mobile }.toDouble())
     Box(
         Modifier.fillMaxWidth().clip(shape)
             .background(Brush.linearGradient(listOf(pal.hdr1.copy(alpha = 0.92f), pal.hdr2.copy(alpha = 0.88f))))
@@ -255,22 +269,27 @@ fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings
         )
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("リアルタイム速度", color = fg.copy(alpha = 0.8f), fontSize = 12.sp)
+                Text(tl("リアルタイム速度", "Live speed"), color = fg.copy(alpha = 0.8f), fontSize = 12.sp)
                 if (Ui.mult != 1f) {
-                    Text("  見かけ ×${multLabel(Ui.mult)}", color = fg.copy(alpha = 0.8f), fontSize = 11.sp)
+                    Text(
+                        tl("  見かけ ×${multLabel(Ui.mult)}", "  Display ×${multLabel(Ui.mult)}"),
+                        color = fg.copy(alpha = 0.8f), fontSize = 11.sp
+                    )
                 }
             }
-            Text("↓ ${fmtD(down)}/s", color = fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("↑ ${fmtD(up)}/s", color = fg.copy(alpha = 0.9f), fontSize = 16.sp)
+            Text("↓ ${fmtD(speed.first * m)}/s", color = fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("↑ ${fmtD(speed.second * m)}/s", color = fg.copy(alpha = 0.9f), fontSize = 16.sp)
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Stat("この期間の合計", fmtD(tot), fg)
-                Stat("Wi-Fi", fmtD(tw), fg)
-                Stat("モバイル", fmtD(tm), fg)
+                Stat(tl("この期間の合計", "Total this period"), fmt(list.sumOf { it.total }), fg)
+                Stat("Wi-Fi", fmt(list.sumOf { it.wifi }), fg)
+                Stat(tl("モバイル", "Mobile"), fmt(list.sumOf { it.mobile }), fg)
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "🔋 ${batt.pct}%" + (if (batt.charging) " ⚡充電中" else "") + "  ・  🌡 ${"%.1f".format(batt.tempC)}°C",
+                "🔋 ${batt.pct}%" +
+                    (if (batt.charging) tl(" ⚡充電中", " ⚡ Charging") else "") +
+                    tl("  ・  ", "  ·  ") + "🌡 ${"%.1f".format(batt.tempC)}°C",
                 color = fg.copy(alpha = 0.9f), fontSize = 13.sp
             )
         }
@@ -281,18 +300,15 @@ fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings
 fun SumCol(label: String, w: Long, m: Long, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     val pal = LocalPal.current
-    val at = animBytes((w + m).toDouble())
-    val aw = animBytes(w.toDouble())
-    val am = animBytes(m.toDouble())
     Column(modifier) {
         Text(label, fontSize = 12.sp, color = cs.onSurfaceVariant)
-        Text(fmtD(at), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(fmt(w + m), fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text(
             buildAnnotatedString {
                 withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
-                append("${fmtD(aw)}  ")
+                append("${fmt(w)}  ")
                 withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
-                append(fmtD(am))
+                append(fmt(m))
             },
             fontSize = 11.sp, color = cs.onSurfaceVariant
         )
@@ -304,10 +320,10 @@ fun SummaryCard(r: Roll) {
     val cs = MaterialTheme.colorScheme
     Glass(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            SumCol("直近7日の合計", r.w7, r.m7, Modifier.weight(1f))
+            SumCol(tl("直近7日の合計", "Last 7 days"), r.w7, r.m7, Modifier.weight(1f))
             Box(Modifier.width(1.dp).height(56.dp).background(cs.onSurface.copy(alpha = 0.15f)))
             Spacer(Modifier.width(16.dp))
-            SumCol("直近30日の合計", r.w30, r.m30, Modifier.weight(1f))
+            SumCol(tl("直近30日の合計", "Last 30 days"), r.w30, r.m30, Modifier.weight(1f))
         }
     }
 }
@@ -316,10 +332,16 @@ fun SummaryCard(r: Roll) {
 fun DayChart(days: List<DayTotal>, mode: Int) {
     val cs = MaterialTheme.colorScheme
     val pal = LocalPal.current
+    val loc = appLocale()
+    val wf = remember(loc) { SimpleDateFormat("E", loc) }
+    val dd = remember(loc) { SimpleDateFormat("d", loc) }
     val max = (days.maxOfOrNull { it.wifi + it.mobile } ?: 1L).coerceAtLeast(1L).toFloat()
     Glass(Modifier.fillMaxWidth(), radius = 24.dp) {
         Column(Modifier.padding(14.dp)) {
-            Text("日ごとの通信量（最大 ${fmt(max.toLong())}）", fontSize = 12.sp, color = cs.onSurfaceVariant)
+            Text(
+                tl("日ごとの通信量（最大 ${fmt(max.toLong())}）", "Daily data (max ${fmt(max.toLong())})"),
+                fontSize = 12.sp, color = cs.onSurfaceVariant
+            )
             Spacer(Modifier.height(8.dp))
             Row(
                 Modifier.fillMaxWidth().height(90.dp),
@@ -327,10 +349,10 @@ fun DayChart(days: List<DayTotal>, mode: Int) {
                 verticalAlignment = Alignment.Bottom
             ) {
                 days.forEach { d ->
-                    val t = d.wifi + d.mobile
-                    val hh by animateFloatAsState(maxOf(2f, 90f * t / max), tween(500), label = "bar")
+                    val tot = d.wifi + d.mobile
+                    val hh by animateFloatAsState(maxOf(2f, 90f * tot / max), tween(500), label = "bar")
                     Box(Modifier.weight(1f).height(hh.dp).clip(RoundedCornerShape(3.dp)).background(cs.surfaceVariant)) {
-                        if (t > 0) Column(Modifier.fillMaxSize()) {
+                        if (tot > 0) Column(Modifier.fillMaxSize()) {
                             if (d.mobile > 0) Box(Modifier.weight(d.mobile.toFloat()).fillMaxWidth().background(pal.mobile))
                             if (d.wifi > 0) Box(Modifier.weight(d.wifi.toFloat()).fillMaxWidth().background(pal.wifi))
                         }
@@ -340,9 +362,10 @@ fun DayChart(days: List<DayTotal>, mode: Int) {
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 days.forEachIndexed { i, d ->
+                    val label = if (mode == 1) wf.format(Date(d.ms))
+                    else if (i % 5 == 0) dd.format(Date(d.ms)) else ""
                     Text(
-                        if (mode == 1 || i % 5 == 0) d.label else "",
-                        Modifier.weight(1f), textAlign = TextAlign.Center,
+                        label, Modifier.weight(1f), textAlign = TextAlign.Center,
                         fontSize = 9.sp, color = cs.onSurfaceVariant, maxLines = 1
                     )
                 }
@@ -355,9 +378,6 @@ fun DayChart(days: List<DayTotal>, mode: Int) {
 fun AppRow(a: AppUsage, max: Float, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val pal = LocalPal.current
-    val at = animBytes(a.total.toDouble())
-    val aw = animBytes(a.wifi.toDouble())
-    val am = animBytes(a.mobile.toDouble())
     val frac by animateFloatAsState((a.total / max).coerceIn(0f, 1f), tween(500), label = "frac")
     Glass(modifier.fillMaxWidth(), radius = 24.dp, onClick = onClick) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -370,11 +390,11 @@ fun AppRow(a: AppUsage, max: Float, modifier: Modifier = Modifier, onClick: () -
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        a.label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        a.shownLabel, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.SemiBold, fontSize = 15.sp
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(fmtD(at), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = cs.primary)
+                    Text(fmt(a.total), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = cs.primary)
                 }
                 Text(a.pkg, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = cs.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
@@ -391,9 +411,9 @@ fun AppRow(a: AppUsage, max: Float, modifier: Modifier = Modifier, onClick: () -
                     Text(
                         buildAnnotatedString {
                             withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
-                            append("${fmtD(aw)}   ")
+                            append("${fmt(a.wifi)}   ")
                             withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
-                            append(fmtD(am))
+                            append(fmt(a.mobile))
                         },
                         fontSize = 11.sp, color = cs.onSurfaceVariant
                     )
