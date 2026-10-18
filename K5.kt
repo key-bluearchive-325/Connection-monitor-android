@@ -37,11 +37,12 @@ class SpeedService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Ui.lang = getSharedPreferences("s", 0).getInt("lang", 0)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CH_ID, "通信速度", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CH_ID, tl("通信速度", "Network speed"), NotificationManager.IMPORTANCE_LOW)
         )
-        val first = build("計測中…", "")
+        val first = build(tl("計測中…", "Measuring…"), "")
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIF_ID, first, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -77,14 +78,17 @@ class SpeedService : Service() {
         var lastQ = 0L
         while (true) {
             delay(1000)
-            val r = TrafficStats.getTotalRxBytes()
-            val t = TrafficStats.getTotalTxBytes()
-            val dr = (r - rx).coerceAtLeast(0L)
-            val dt = (t - tx).coerceAtLeast(0L)
-            rx = r
-            tx = t
+            val nr = TrafficStats.getTotalRxBytes()
+            val nt = TrafficStats.getTotalTxBytes()
+            val dr = (nr - rx).coerceAtLeast(0L)
+            val dt = (nt - tx).coerceAtLeast(0L)
+            rx = nr
+            tx = nt
             if (!pm.isInteractive) continue
-            val mult = getSharedPreferences("s", 0).getFloat("mult", 1f).toDouble()
+            val prefs = getSharedPreferences("s", 0)
+            val mult = prefs.getFloat("mult", 1f).toDouble()
+            val lg = prefs.getInt("lang", 0)
+            if (Ui.lang != lg) Ui.lang = lg
             val now = System.currentTimeMillis()
             if (now - lastQ > 15000) {
                 runCatching {
@@ -101,7 +105,10 @@ class SpeedService : Service() {
                 NOTIF_ID,
                 build(
                     "↓ ${fmtD(dr * mult)}/s   ↑ ${fmtD(dt * mult)}/s",
-                    "今日 ${fmt(sw + sm)}  ・  Wi-Fi ${fmt(sw)} / モバイル ${fmt(sm)}"
+                    tl(
+                        "今日 ${fmt(sw + sm)}  ・  Wi-Fi ${fmt(sw)} / モバイル ${fmt(sm)}",
+                        "Today ${fmt(sw + sm)}  ·  Wi-Fi ${fmt(sw)} / Mobile ${fmt(sm)}"
+                    )
                 )
             )
         }
