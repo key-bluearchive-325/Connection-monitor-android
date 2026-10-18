@@ -4,10 +4,12 @@ import android.content.Intent
 import android.net.TrafficStats
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -67,14 +70,16 @@ fun UsageScreen() {
     var offset by remember { mutableIntStateOf(0) }
     var sortBy by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
-    var selected by remember { mutableStateOf<AppUsage?>(null) }
+    var detailOpen by remember { mutableStateOf(false) }
+    var detailApp by remember { mutableStateOf<AppUsage?>(null) }
     var data by remember { mutableStateOf(Loaded()) }
     var speed by remember { mutableStateOf(0L to 0L) }
     var batt by remember { mutableStateOf(readBattery(ctx)) }
     var tick by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
 
-    BackHandler(enabled = showSettings || selected != null) {
-        if (selected != null) selected = null else showSettings = false
+    BackHandler(enabled = showSettings || detailOpen) {
+        if (detailOpen) detailOpen = false else showSettings = false
     }
 
     // 履歴の保存（前日までを追記）
@@ -98,48 +103,108 @@ fun UsageScreen() {
             delay(1000)
             val r = TrafficStats.getTotalRxBytes()
             val t = TrafficStats.getTotalTxBytes()
-            speed = (r - rx) to (t - tx)
+            speed = (r - rx).coerceAtLeast(0L) to (t - tx).coerceAtLeast(0L)
             rx = r; tx = t
         }
     }
 
-    if (showSettings) { SettingsScreen { showSettings = false }; return }
-    val sel = selected
-    if (sel != null) { AppDetailScreen(sel) { selected = null }; return }
+    val page = if (showSettings) 1 else if (detailOpen) 2 else 0
+    AnimatedContent(
+        targetState = page,
+        transitionSpec = {
+            if (targetState > initialState) {
+                val inn = slideInHorizontally(tween(320)) { it / 3 } + fadeIn(tween(320))
+                val out = slideOutHorizontally(tween(320)) { -it / 4 } + fadeOut(tween(200))
+                inn togetherWith out
+            } else {
+                val inn = slideInHorizontally(tween(320)) { -it / 4 } + fadeIn(tween(320))
+                val out = slideOutHorizontally(tween(320)) { it / 3 } + fadeOut(tween(200))
+                inn togetherWith out
+            }
+        },
+        label = "page"
+    ) { p ->
+        when (p) {
+            1 -> SettingsScreen { showSettings = false }
+            2 -> detailApp?.let { AppDetailScreen(it) { detailOpen = false } }
+            else -> MainList(
+                state = listState, data = data, speed = speed, batt = batt,
+                mode = mode, offset = offset, sortBy = sortBy,
+                onMode = { m -> mode = m; offset = 0 },
+                onOffset = { o -> offset = o },
+                onSort = { sortBy = 1 - sortBy },
+                onSettings = { showSettings = true },
+                onApp = { a -> detailApp = a; detailOpen = true }
+            )
+        }
+    }
+}
 
+@Composable
+fun MainList(
+    state: LazyListState, data: Loaded, speed: Pair<Long, Long>, batt: Batt,
+    mode: Int, offset: Int, sortBy: Int,
+    onMode: (Int) -> Unit, onOffset: (Int) -> Unit, onSort: () -> Unit,
+    onSettings: () -> Unit, onApp: (AppUsage) -> Unit
+) {
     val sorted = if (sortBy == 0) data.apps.sortedByDescending { it.total }
     else data.apps.sortedByDescending { it.fgMs }
     val max = (data.apps.maxOfOrNull { it.total } ?: 1L).coerceAtLeast(1L).toFloat()
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().pointerInput(offset) {
+            // 左右スワイプで期間を移動
+            var total = 0f
+            detectHorizontalDragGestures(
+                onDragStart = { total = 0f },
+                onDragEnd = {
+                    if (total > 160f) onOffset(offset - 1)
+                    else if (total < -160f && offset < 0) onOffset(offset + 1)
+                },
+                onDragCancel = { total = 0f }
+            ) { _, d -> total += d }
+        },
+        state = state,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item { Header(speed, data.apps, batt) { showSettings = true } }
+        item { Header(speed, data.apps, batt, onSettings) }
         item { SummaryCard(data.roll) }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("日", "週", "月").forEachIndexed { i, s ->
-                    Pill(s, mode == i) { mode = i; offset = 0 }
-                }
+                listOf("日", "週", "月").forEachIndexed { i, s -> Pill(s, mode == i) { onMode(i) } }
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { offset-- }) { Text("◀") }
-                Text(
-                    periodLabel(mode, offset), Modifier.weight(1f),
-                    textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, fontSize = 16.sp
-                )
-                TextButton(onClick = { offset++ }, enabled = offset < 0) { Text("▶") }
+                TextButton(onClick = { onOffset(offset - 1) }) { Text("◀") }
+                AnimatedContent(
+                    targetState = mode to offset,
+                    modifier = Modifier.weight(1f),
+                    transitionSpec = {
+                        if (targetState.first != initialState.first) {
+                            fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                        } else {
+                            val dir = if (targetState.second < initialState.second) -1 else 1
+                            val inn = slideInHorizontally(tween(260)) { dir * it / 2 } + fadeIn(tween(260))
+                            val out = slideOutHorizontally(tween(260)) { -dir * it / 2 } + fadeOut(tween(160))
+                            inn togetherWith out
+                        }
+                    },
+                    label = "period"
+                ) { (m, o) ->
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text(periodLabel(m, o), fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                    }
+                }
+                TextButton(onClick = { onOffset(offset + 1) }, enabled = offset < 0) { Text("▶") }
             }
         }
         if (mode > 0 && data.days.isNotEmpty()) item { DayChart(data.days, mode) }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("アプリ別（タップで詳細）", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                Pill(if (sortBy == 0) "通信量順" else "使用時間順", true) { sortBy = 1 - sortBy }
+                Pill(if (sortBy == 0) "通信量順" else "使用時間順", true) { onSort() }
             }
         }
         if (sorted.isEmpty()) item {
@@ -148,26 +213,34 @@ fun UsageScreen() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp
             )
         }
-        items(sorted, key = { it.pkg }) { a -> AppRow(a, max) { selected = a } }
+        items(sorted, key = { it.pkg }) { a ->
+            AppRow(a, max, Modifier.animateItem()) { onApp(a) }
+        }
     }
 }
 
 @Composable
-fun Stat(label: String, value: String) {
+fun Stat(label: String, value: String, fg: Color) {
     Column {
-        Text(label, color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
-        Text(value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = fg.copy(alpha = 0.75f), fontSize = 11.sp)
+        Text(value, color = fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings: () -> Unit) {
-    val ac = Color(ACCENTS[Ui.accent])
-    val ac2 = Color(ACCENTS[(Ui.accent + 1) % ACCENTS.size])
+    val pal = LocalPal.current
+    val fg = pal.onHdr
     val shape = RoundedCornerShape(32.dp)
+    val m = Ui.mult.toDouble()
+    val down = animBytes(speed.first * m)
+    val up = animBytes(speed.second * m)
+    val tot = animBytes(list.sumOf { it.total }.toDouble())
+    val tw = animBytes(list.sumOf { it.wifi }.toDouble())
+    val tm = animBytes(list.sumOf { it.mobile }.toDouble())
     Box(
         Modifier.fillMaxWidth().clip(shape)
-            .background(Brush.linearGradient(listOf(ac.copy(alpha = 0.92f), ac2.copy(alpha = 0.85f))))
+            .background(Brush.linearGradient(listOf(pal.hdr1.copy(alpha = 0.92f), pal.hdr2.copy(alpha = 0.88f))))
             .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.Transparent)))
             .border(
                 1.dp,
@@ -177,23 +250,28 @@ fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings
             .padding(20.dp)
     ) {
         Text(
-            "⚙", fontSize = 22.sp, color = Color.White,
+            "⚙", fontSize = 22.sp, color = fg,
             modifier = Modifier.align(Alignment.TopEnd).clickable { onSettings() }.padding(4.dp)
         )
         Column {
-            Text("リアルタイム速度", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-            Text("↓ ${fmt(speed.first)}/s", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("↑ ${fmt(speed.second)}/s", color = Color.White.copy(alpha = 0.9f), fontSize = 16.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("リアルタイム速度", color = fg.copy(alpha = 0.8f), fontSize = 12.sp)
+                if (Ui.mult != 1f) {
+                    Text("  見かけ ×${multLabel(Ui.mult)}", color = fg.copy(alpha = 0.8f), fontSize = 11.sp)
+                }
+            }
+            Text("↓ ${fmtD(down)}/s", color = fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text("↑ ${fmtD(up)}/s", color = fg.copy(alpha = 0.9f), fontSize = 16.sp)
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Stat("この期間の合計", fmt(list.sumOf { it.total }))
-                Stat("Wi-Fi", fmt(list.sumOf { it.wifi }))
-                Stat("モバイル", fmt(list.sumOf { it.mobile }))
+                Stat("この期間の合計", fmtD(tot), fg)
+                Stat("Wi-Fi", fmtD(tw), fg)
+                Stat("モバイル", fmtD(tm), fg)
             }
             Spacer(Modifier.height(16.dp))
             Text(
                 "🔋 ${batt.pct}%" + (if (batt.charging) " ⚡充電中" else "") + "  ・  🌡 ${"%.1f".format(batt.tempC)}°C",
-                color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp
+                color = fg.copy(alpha = 0.9f), fontSize = 13.sp
             )
         }
     }
@@ -202,15 +280,19 @@ fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings
 @Composable
 fun SumCol(label: String, w: Long, m: Long, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
+    val pal = LocalPal.current
+    val at = animBytes((w + m).toDouble())
+    val aw = animBytes(w.toDouble())
+    val am = animBytes(m.toDouble())
     Column(modifier) {
         Text(label, fontSize = 12.sp, color = cs.onSurfaceVariant)
-        Text(fmt(w + m), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(fmtD(at), fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Text(
             buildAnnotatedString {
-                withStyle(SpanStyle(color = WifiColor)) { append("● ") }
-                append("${fmt(w)}  ")
-                withStyle(SpanStyle(color = MobileColor)) { append("● ") }
-                append(fmt(m))
+                withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
+                append("${fmtD(aw)}  ")
+                withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
+                append(fmtD(am))
             },
             fontSize = 11.sp, color = cs.onSurfaceVariant
         )
@@ -233,6 +315,7 @@ fun SummaryCard(r: Roll) {
 @Composable
 fun DayChart(days: List<DayTotal>, mode: Int) {
     val cs = MaterialTheme.colorScheme
+    val pal = LocalPal.current
     val max = (days.maxOfOrNull { it.wifi + it.mobile } ?: 1L).coerceAtLeast(1L).toFloat()
     Glass(Modifier.fillMaxWidth(), radius = 24.dp) {
         Column(Modifier.padding(14.dp)) {
@@ -245,11 +328,11 @@ fun DayChart(days: List<DayTotal>, mode: Int) {
             ) {
                 days.forEach { d ->
                     val t = d.wifi + d.mobile
-                    val h = maxOf(2f, 90f * t / max).dp
-                    Box(Modifier.weight(1f).height(h).clip(RoundedCornerShape(3.dp)).background(cs.surfaceVariant)) {
+                    val hh by animateFloatAsState(maxOf(2f, 90f * t / max), tween(500), label = "bar")
+                    Box(Modifier.weight(1f).height(hh.dp).clip(RoundedCornerShape(3.dp)).background(cs.surfaceVariant)) {
                         if (t > 0) Column(Modifier.fillMaxSize()) {
-                            if (d.mobile > 0) Box(Modifier.weight(d.mobile.toFloat()).fillMaxWidth().background(MobileColor))
-                            if (d.wifi > 0) Box(Modifier.weight(d.wifi.toFloat()).fillMaxWidth().background(WifiColor))
+                            if (d.mobile > 0) Box(Modifier.weight(d.mobile.toFloat()).fillMaxWidth().background(pal.mobile))
+                            if (d.wifi > 0) Box(Modifier.weight(d.wifi.toFloat()).fillMaxWidth().background(pal.wifi))
                         }
                     }
                 }
@@ -269,9 +352,14 @@ fun DayChart(days: List<DayTotal>, mode: Int) {
 }
 
 @Composable
-fun AppRow(a: AppUsage, max: Float, onClick: () -> Unit) {
+fun AppRow(a: AppUsage, max: Float, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Glass(Modifier.fillMaxWidth(), radius = 24.dp, onClick = onClick) {
+    val pal = LocalPal.current
+    val at = animBytes(a.total.toDouble())
+    val aw = animBytes(a.wifi.toDouble())
+    val am = animBytes(a.mobile.toDouble())
+    val frac by animateFloatAsState((a.total / max).coerceIn(0f, 1f), tween(500), label = "frac")
+    Glass(modifier.fillMaxWidth(), radius = 24.dp, onClick = onClick) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             if (a.icon != null) {
                 Image(a.icon, null, Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)))
@@ -286,16 +374,15 @@ fun AppRow(a: AppUsage, max: Float, onClick: () -> Unit) {
                         fontWeight = FontWeight.SemiBold, fontSize = 15.sp
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(fmt(a.total), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = cs.primary)
+                    Text(fmtD(at), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = cs.primary)
                 }
                 Text(a.pkg, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp, color = cs.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
                 Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(cs.surfaceVariant)) {
-                    val f = (a.total / max).coerceIn(0f, 1f)
                     if (a.total > 0) {
-                        Row(Modifier.fillMaxWidth(f).fillMaxHeight()) {
-                            if (a.wifi > 0) Box(Modifier.weight(a.wifi.toFloat()).fillMaxHeight().background(WifiColor))
-                            if (a.mobile > 0) Box(Modifier.weight(a.mobile.toFloat()).fillMaxHeight().background(MobileColor))
+                        Row(Modifier.fillMaxWidth(frac).fillMaxHeight()) {
+                            if (a.wifi > 0) Box(Modifier.weight(a.wifi.toFloat()).fillMaxHeight().background(pal.wifi))
+                            if (a.mobile > 0) Box(Modifier.weight(a.mobile.toFloat()).fillMaxHeight().background(pal.mobile))
                         }
                     }
                 }
@@ -303,10 +390,10 @@ fun AppRow(a: AppUsage, max: Float, onClick: () -> Unit) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         buildAnnotatedString {
-                            withStyle(SpanStyle(color = WifiColor)) { append("● ") }
-                            append("${fmt(a.wifi)}   ")
-                            withStyle(SpanStyle(color = MobileColor)) { append("● ") }
-                            append(fmt(a.mobile))
+                            withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
+                            append("${fmtD(aw)}   ")
+                            withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
+                            append(fmtD(am))
                         },
                         fontSize = 11.sp, color = cs.onSurfaceVariant
                     )
