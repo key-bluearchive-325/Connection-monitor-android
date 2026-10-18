@@ -1,12 +1,17 @@
 package com.example.datausage
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,11 +29,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -62,6 +67,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val prefs = remember { ctx.getSharedPreferences("s", 0) }
     var hz by remember { mutableStateOf(prefs.getBoolean("hz", true)) }
+    var notif by remember { mutableStateOf(prefs.getBoolean("notif", false)) }
     var preset by remember { mutableIntStateOf(prefs.getInt("preset", 0)) }
     var name by remember { mutableStateOf("") }
     var emoji by remember { mutableStateOf("📶") }
@@ -72,10 +78,26 @@ fun SettingsScreen(onBack: () -> Unit) {
         Ui.mode = i
         prefs.edit().putInt("mode", i).apply()
     }
+    val setPalette = { i: Int ->
+        Ui.palette = i
+        prefs.edit().putInt("palette", i).apply()
+        if (i == 1 && Build.VERSION.SDK_INT < 31) {
+            Toast.makeText(ctx, "Material YouはAndroid 12以降で使えます（標準色で表示します）", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val setMult = { v: Float ->
+        Ui.mult = v
+        prefs.edit().putFloat("mult", v).apply()
+    }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        notif = ok
+        if (ok) setSpeedNotif(ctx, true)
+        else Toast.makeText(ctx, "通知の許可が必要です。端末の設定で許可してください", Toast.LENGTH_LONG).show()
+    }
     BackHandler { onBack() }
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().swipeBack(onBack),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -94,11 +116,17 @@ fun SettingsScreen(onBack: () -> Unit) {
                     }
                 }
                 Pill("AMOLED（真っ黒）", Ui.mode == 3) { setMode(3) }
+                Text("配色", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("標準", "Material You", "モノクロ").forEachIndexed { i, s ->
+                        Pill(s, Ui.palette == i) { setPalette(i) }
+                    }
+                }
                 Text(
-                    "AMOLEDは背景が完全な黒になり、有機ELディスプレイの省電力に有利です。",
+                    "Material Youは壁紙から色を自動で作ります（Android 12以降）。",
                     fontSize = 12.sp, color = cs.onSurfaceVariant
                 )
-                Text("アクセントカラー", fontSize = 12.sp, color = cs.onSurfaceVariant)
+                Text("アクセントカラー（「標準」の配色で使われます）", fontSize = 12.sp, color = cs.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ACCENTS.forEachIndexed { i, c ->
                         Box(
@@ -110,6 +138,48 @@ fun SettingsScreen(onBack: () -> Unit) {
                                 }
                         )
                     }
+                }
+            }
+        }
+        item {
+            GSection("リアルタイム速度の表示倍率（見かけだけ）") {
+                Text(
+                    "速度の表示だけを変えます。実際の通信量や合計には影響しません。通知の速度表示にも反映されます。",
+                    fontSize = 12.sp, color = cs.onSurfaceVariant
+                )
+                val opts = listOf(0.1f, 0.5f, 1f, 2f, 10f, 100f)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    opts.take(3).forEach { v -> Pill("×${multLabel(v)}", Ui.mult == v) { setMult(v) } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    opts.drop(3).forEach { v -> Pill("×${multLabel(v)}", Ui.mult == v) { setMult(v) } }
+                }
+            }
+        }
+        item {
+            GSection("通知") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("通知で速度と今日の通信量を表示")
+                        Text(
+                            "常駐通知で、速度は1秒ごと、今日の合計は約15秒ごとに更新します。画面オフ中は更新を止めて電池を節約します。",
+                            fontSize = 12.sp, color = cs.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = notif, onCheckedChange = { v ->
+                        if (!v) {
+                            notif = false
+                            setSpeedNotif(ctx, false)
+                        } else if (Build.VERSION.SDK_INT >= 33 &&
+                            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
+                            != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            permLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            notif = true
+                            setSpeedNotif(ctx, true)
+                        }
+                    })
                 }
             }
         }
@@ -201,6 +271,7 @@ fun SettingsScreen(onBack: () -> Unit) {
 fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
+    val pal = LocalPal.current
     val pm = ctx.packageManager
     var n by remember { mutableIntStateOf(7) }
     var d by remember { mutableStateOf<Detail?>(null) }
@@ -227,9 +298,15 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
         DayTotal(if (n <= 7) wf.format(Date(r.ms)) else dd.format(Date(r.ms)), r.wifi, r.mobile)
     }
     val ai = info?.applicationInfo
+    val aTot = animBytes((tw + tm).toDouble())
+    val aW = animBytes(tw.toDouble())
+    val aM = animBytes(tm.toDouble())
+    val sw = d?.savedWifi ?: 0L
+    val sm = d?.savedMobile ?: 0L
+    val aSaved = animBytes((sw + sm).toDouble())
 
     LazyColumn(
-        Modifier.fillMaxSize(),
+        Modifier.fillMaxSize().swipeBack(onBack),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -282,13 +359,13 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
         }
         item {
             GSection("直近${n}日の合計") {
-                Text(fmt(tw + tm), fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text(fmtD(aTot), fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text(
                     buildAnnotatedString {
-                        withStyle(SpanStyle(color = WifiColor)) { append("● ") }
-                        append("Wi-Fi ${fmt(tw)}   ")
-                        withStyle(SpanStyle(color = MobileColor)) { append("● ") }
-                        append("モバイル ${fmt(tm)}")
+                        withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
+                        append("Wi-Fi ${fmtD(aW)}   ")
+                        withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
+                        append("モバイル ${fmtD(aM)}")
                     },
                     fontSize = 13.sp, color = cs.onSurfaceVariant
                 )
@@ -306,10 +383,8 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
         }
         if (chart.isNotEmpty()) item { DayChart(chart, if (n <= 7) 1 else 2) }
         item {
-            val sw = d?.savedWifi ?: 0L
-            val sm = d?.savedMobile ?: 0L
             GSection("保存済み期間の累計") {
-                Text(fmt(sw + sm), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(fmtD(aSaved), fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(
                     "Wi-Fi ${fmt(sw)} / モバイル ${fmt(sm)}（前日までの保存データ分）",
                     fontSize = 12.sp, color = cs.onSurfaceVariant
@@ -343,9 +418,9 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
                         Text(r.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         Text(
                             buildAnnotatedString {
-                                withStyle(SpanStyle(color = WifiColor)) { append("● ") }
+                                withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
                                 append("${fmt(r.wifi)}  ")
-                                withStyle(SpanStyle(color = MobileColor)) { append("● ") }
+                                withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
                                 append(fmt(r.mobile))
                             },
                             fontSize = 11.sp, color = cs.onSurfaceVariant
