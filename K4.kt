@@ -39,7 +39,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 @Composable
 fun GSection(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -82,51 +81,81 @@ fun SettingsScreen(onBack: () -> Unit) {
         Ui.palette = i
         prefs.edit().putInt("palette", i).apply()
         if (i == 1 && Build.VERSION.SDK_INT < 31) {
-            Toast.makeText(ctx, "Material YouはAndroid 12以降で使えます（標準色で表示します）", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                ctx,
+                tl("Material YouはAndroid 12以降で使えます（標準色で表示します）", "Material You needs Android 12 or later (using default colours)."),
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
     val setMult = { v: Float ->
         Ui.mult = v
         prefs.edit().putFloat("mult", v).apply()
     }
+    val setLang = { i: Int ->
+        Ui.lang = i
+        prefs.edit().putInt("lang", i).apply()
+    }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         notif = ok
         if (ok) setSpeedNotif(ctx, true)
-        else Toast.makeText(ctx, "通知の許可が必要です。端末の設定で許可してください", Toast.LENGTH_LONG).show()
+        else Toast.makeText(
+            ctx,
+            tl("通知の許可が必要です。端末の設定で許可してください", "Notification permission is required. Please allow it in system settings."),
+            Toast.LENGTH_LONG
+        ).show()
     }
     BackHandler { onBack() }
 
     LazyColumn(
         Modifier.fillMaxSize().swipeBack(onBack),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = pagePadding(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("◀ 戻る") }
+                TextButton(onClick = onBack) { Text(tl("◀ 戻る", "◀ Back")) }
                 Spacer(Modifier.width(8.dp))
-                Text("設定", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(tl("設定", "Settings"), fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
         item {
-            GSection("テーマ") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("自動", "ライト", "ダーク").forEachIndexed { i, s ->
-                        Pill(s, Ui.mode == i) { setMode(i) }
-                    }
-                }
-                Pill("AMOLED（真っ黒）", Ui.mode == 3) { setMode(3) }
-                Text("配色", fontSize = 12.sp, color = cs.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("標準", "Material You", "モノクロ").forEachIndexed { i, s ->
-                        Pill(s, Ui.palette == i) { setPalette(i) }
-                    }
-                }
+            GSection(tl("言語", "Language")) {
+                PillRows(listOf("自動 / Auto", "日本語", "English (UK)"), Ui.lang, 2) { setLang(it) }
                 Text(
-                    "Material Youは壁紙から色を自動で作ります（Android 12以降）。",
+                    tl(
+                        "「自動」は端末の言語が日本語なら日本語、それ以外はイギリス英語で表示します。",
+                        "Auto uses Japanese when your device language is Japanese, and British English otherwise."
+                    ),
                     fontSize = 12.sp, color = cs.onSurfaceVariant
                 )
-                Text("アクセントカラー（「標準」の配色で使われます）", fontSize = 12.sp, color = cs.onSurfaceVariant)
+            }
+        }
+        item {
+            GSection(tl("テーマ", "Theme")) {
+                PillRows(
+                    listOf(
+                        tl("自動", "Auto"), tl("ライト", "Light"), tl("ダーク", "Dark"),
+                        tl("AMOLED（真っ黒）", "AMOLED (pure black)")
+                    ),
+                    Ui.mode, 3
+                ) { setMode(it) }
+                Text(tl("配色", "Colour scheme"), fontSize = 12.sp, color = cs.onSurfaceVariant)
+                PillRows(
+                    listOf(tl("標準", "Default"), "Material You", tl("モノクロ", "Monochrome")),
+                    Ui.palette, 2
+                ) { setPalette(it) }
+                Text(
+                    tl(
+                        "Material Youは壁紙から色を自動で作ります（Android 12以降）。",
+                        "Material You builds its colours from your wallpaper (Android 12 or later)."
+                    ),
+                    fontSize = 12.sp, color = cs.onSurfaceVariant
+                )
+                Text(
+                    tl("アクセントカラー（「標準」の配色で使われます）", "Accent colour (used by the Default scheme)"),
+                    fontSize = 12.sp, color = cs.onSurfaceVariant
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     ACCENTS.forEachIndexed { i, c ->
                         Box(
@@ -142,27 +171,28 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item {
-            GSection("リアルタイム速度の表示倍率（見かけだけ）") {
+            GSection(tl("リアルタイム速度の表示倍率（見かけだけ）", "Live speed display multiplier (cosmetic only)")) {
                 Text(
-                    "速度の表示だけを変えます。実際の通信量や合計には影響しません。通知の速度表示にも反映されます。",
+                    tl(
+                        "速度の表示だけを変えます。実際の通信量や合計には影響しません。通知の速度表示にも反映されます。",
+                        "Only changes how the speed is displayed. Real usage and totals are not affected. It also applies to the speed in the notification."
+                    ),
                     fontSize = 12.sp, color = cs.onSurfaceVariant
                 )
-                val opts = listOf(0.1f, 0.5f, 1f, 2f, 10f, 100f)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    opts.take(3).forEach { v -> Pill("×${multLabel(v)}", Ui.mult == v) { setMult(v) } }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    opts.drop(3).forEach { v -> Pill("×${multLabel(v)}", Ui.mult == v) { setMult(v) } }
-                }
+                val opts = listOf(0.1f, 0.5f, 1f, 2f, 10f, 100f, 1000f, 10000f, 114514f)
+                PillRows(opts.map { "×${multLabel(it)}" }, opts.indexOf(Ui.mult), 3) { setMult(opts[it]) }
             }
         }
         item {
-            GSection("通知") {
+            GSection(tl("通知", "Notification")) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("通知で速度と今日の通信量を表示")
+                        Text(tl("通知で速度と今日の通信量を表示", "Show speed and today's usage in a notification"))
                         Text(
-                            "常駐通知で、速度は1秒ごと、今日の合計は約15秒ごとに更新します。画面オフ中は更新を止めて電池を節約します。",
+                            tl(
+                                "常駐通知で、速度は1秒ごと、今日の合計は約15秒ごとに更新します。画面オフ中は更新を止めて電池を節約します。",
+                                "A persistent notification. Speed updates every second and today's total about every 15 seconds. Updates pause while the screen is off to save battery."
+                            ),
                             fontSize = 12.sp, color = cs.onSurfaceVariant
                         )
                     }
@@ -184,12 +214,15 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item {
-            GSection("表示") {
+            GSection(tl("表示", "Display")) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("高リフレッシュレート（最大120Hz）")
+                        Text(tl("高リフレッシュレート（最大120Hz）", "High refresh rate (up to 120 Hz)"))
                         Text(
-                            "対応端末でスクロールが滑らかになります。バッテリー消費は少し増えます。",
+                            tl(
+                                "対応端末でスクロールが滑らかになります。バッテリー消費は少し増えます。",
+                                "Smoother scrolling on supported devices. Uses slightly more battery."
+                            ),
                             fontSize = 12.sp, color = cs.onSurfaceVariant
                         )
                     }
@@ -202,26 +235,37 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item {
-            GSection("履歴の保存") {
+            GSection(tl("履歴の保存", "History")) {
                 Text(
-                    "毎日の通信量をこの端末内に自動保存します（アプリを開いたときに前日までを追加）。保存済み: ${histDays}日分",
+                    tl(
+                        "毎日の通信量をこの端末内に自動保存します（アプリを開いたときに前日までを追加）。保存済み: ${histDays}日分",
+                        "Daily usage is saved automatically on this device (previous days are added when you open the app). Saved: $histDays days."
+                    ),
                     fontSize = 13.sp, color = cs.onSurfaceVariant
                 )
                 Button(onClick = {
                     History.clear(ctx)
                     histDays = 0
-                    Toast.makeText(ctx, "消去しました。次回起動時にOSの履歴から再取得します", Toast.LENGTH_SHORT).show()
-                }) { Text("保存データを消去") }
+                    Toast.makeText(
+                        ctx,
+                        tl("消去しました。次回起動時にOSの履歴から再取得します", "Cleared. It will be re-imported from Android's history the next time you open the app."),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text(tl("保存データを消去", "Clear saved data")) }
             }
         }
         item {
-            GSection("ホーム画面のアイコンと名前（プリセット）") {
-                PRESET_LABELS.forEachIndexed { i, label ->
+            GSection(tl("ホーム画面のアイコンと名前（プリセット）", "Home screen icon and name (presets)")) {
+                presetLabels().forEachIndexed { i, label ->
                     val select = {
                         preset = i
                         prefs.edit().putInt("preset", i).apply()
                         setLauncherPreset(ctx, i)
-                        Toast.makeText(ctx, "反映まで数秒〜数十秒かかります", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            ctx,
+                            tl("反映まで数秒〜数十秒かかります", "It may take a few seconds to update."),
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                     Row(Modifier.fillMaxWidth().clickable { select() }, verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = preset == i, onClick = { select() })
@@ -231,14 +275,14 @@ fun SettingsScreen(onBack: () -> Unit) {
             }
         }
         item {
-            GSection("好きな名前・アイコンでホーム画面に追加") {
+            GSection(tl("好きな名前・アイコンでホーム画面に追加", "Add to home screen with a custom name and icon")) {
                 OutlinedTextField(
                     value = name, onValueChange = { name = it },
-                    label = { Text("アプリ名") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                    label = { Text(tl("アプリ名", "App name")) }, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = emoji, onValueChange = { emoji = it.take(4) },
-                    label = { Text("アイコンの絵文字") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+                    label = { Text(tl("アイコンの絵文字", "Icon emoji")) }, singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     scColors.forEachIndexed { i, c ->
@@ -251,14 +295,22 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
                 Button(onClick = {
                     val ok = pinShortcut(ctx, name, emoji, Color(scColors[scIdx]).toArgb())
-                    Toast.makeText(ctx, if (ok) "追加の確認画面で許可してください" else "このホーム画面は非対応です", Toast.LENGTH_SHORT).show()
-                }) { Text("ホーム画面に追加") }
+                    Toast.makeText(
+                        ctx,
+                        if (ok) tl("追加の確認画面で許可してください", "Confirm in the prompt to add it.")
+                        else tl("このホーム画面は非対応です", "This launcher doesn't support it."),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text(tl("ホーム画面に追加", "Add to home screen")) }
             }
         }
         item {
-            GSection("パッケージ名") {
+            GSection(tl("パッケージ名", "Package name")) {
                 Text(
-                    "アプリ内からは変更できません。GitHub の Actions → Build APK → Run workflow で、アプリ名とパッケージ名を入力してビルドし直してください（別のアプリとしてインストールされ、保存した履歴も別になります）。",
+                    tl(
+                        "アプリ内からは変更できません。GitHub の Actions → Build APK → Run workflow で、アプリ名とパッケージ名を入力してビルドし直してください（別のアプリとしてインストールされ、保存した履歴も別になります）。",
+                        "This can't be changed inside the app. In GitHub, go to Actions → Build APK → Run workflow, enter the app name and package name, and build again (it installs as a separate app with its own history)."
+                    ),
                     fontSize = 13.sp, color = cs.onSurfaceVariant
                 )
             }
@@ -276,9 +328,9 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
     var n by remember { mutableIntStateOf(7) }
     var d by remember { mutableStateOf<Detail?>(null) }
     val info = remember(app.pkg) { runCatching { pm.getPackageInfo(app.pkg, 0) }.getOrNull() }
-    val df = remember { SimpleDateFormat("yyyy/M/d HH:mm", Locale.JAPAN) }
-    val wf = remember { SimpleDateFormat("E", Locale.JAPAN) }
-    val dd = remember { SimpleDateFormat("d", Locale.JAPAN) }
+    val loc = appLocale()
+    val df = remember(loc) { SimpleDateFormat(if (isJa()) "yyyy/M/d HH:mm" else "d MMM yyyy, HH:mm", loc) }
+    val rf = remember(loc) { SimpleDateFormat(if (isJa()) "M/d(E)" else "EEE d MMM", loc) }
     BackHandler { onBack() }
 
     LaunchedEffect(app.pkg, n) {
@@ -294,27 +346,21 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
     val tm = rows.sumOf { it.mobile }
     val tf = rows.sumOf { it.fgMs }
     val maxDay = rows.maxByOrNull { it.wifi + it.mobile }
-    val chart = rows.map { r ->
-        DayTotal(if (n <= 7) wf.format(Date(r.ms)) else dd.format(Date(r.ms)), r.wifi, r.mobile)
-    }
+    val chart = rows.map { r -> DayTotal(r.ms, r.wifi, r.mobile) }
     val ai = info?.applicationInfo
-    val aTot = animBytes((tw + tm).toDouble())
-    val aW = animBytes(tw.toDouble())
-    val aM = animBytes(tm.toDouble())
     val sw = d?.savedWifi ?: 0L
     val sm = d?.savedMobile ?: 0L
-    val aSaved = animBytes((sw + sm).toDouble())
 
     LazyColumn(
         Modifier.fillMaxSize().swipeBack(onBack),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = pagePadding(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack) { Text("◀ 戻る") }
+                TextButton(onClick = onBack) { Text(tl("◀ 戻る", "◀ Back")) }
                 Spacer(Modifier.width(8.dp))
-                Text("アプリの詳細", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(tl("アプリの詳細", "App details"), fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
         }
         item {
@@ -327,26 +373,33 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
                     }
                     Spacer(Modifier.width(14.dp))
                     Column {
-                        Text(app.label, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(app.shownLabel, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         Text(app.pkg, fontSize = 12.sp, color = cs.onSurfaceVariant)
                     }
                 }
             }
         }
         item {
-            GSection("アプリ情報") {
+            GSection(tl("アプリ情報", "App info")) {
                 if (info != null) {
-                    InfoRow("バージョン", "${info.versionName ?: "-"} (${info.longVersionCode})")
-                    InfoRow("インストール日", df.format(Date(info.firstInstallTime)))
-                    InfoRow("最終更新", df.format(Date(info.lastUpdateTime)))
+                    InfoRow(tl("バージョン", "Version"), "${info.versionName ?: "-"} (${info.longVersionCode})")
+                    InfoRow(tl("インストール日", "Installed"), df.format(Date(info.firstInstallTime)))
+                    InfoRow(tl("最終更新", "Last updated"), df.format(Date(info.lastUpdateTime)))
                     if (ai != null) {
                         InfoRow("UID", ai.uid.toString())
-                        InfoRow("対象SDK", ai.targetSdkVersion.toString())
-                        InfoRow("種類", if ((ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0) "システムアプリ" else "ユーザーアプリ")
+                        InfoRow(tl("対象SDK", "Target SDK"), ai.targetSdkVersion.toString())
+                        InfoRow(
+                            tl("種類", "Type"),
+                            if ((ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0) tl("システムアプリ", "System app")
+                            else tl("ユーザーアプリ", "User app")
+                        )
                     }
                 } else {
                     Text(
-                        "このアプリの情報を取得できません（削除済み、またはシステム/共有UIDの可能性があります）。",
+                        tl(
+                            "このアプリの情報を取得できません（削除済み、またはシステム/共有UIDの可能性があります）。",
+                            "Can't read this app's info (it may be uninstalled, or a system / shared UID)."
+                        ),
                         fontSize = 13.sp, color = cs.onSurfaceVariant
                     )
                 }
@@ -354,39 +407,49 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(7, 30, 90).forEach { v -> Pill("${v}日", n == v) { n = v } }
+                listOf(7, 30, 90).forEach { v ->
+                    Pill(tl("${v}日", "$v days"), n == v) { n = v }
+                }
             }
         }
         item {
-            GSection("直近${n}日の合計") {
-                Text(fmtD(aTot), fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            GSection(tl("直近${n}日の合計", "Last $n days")) {
+                Text(fmt(tw + tm), fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text(
                     buildAnnotatedString {
                         withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
-                        append("Wi-Fi ${fmtD(aW)}   ")
+                        append("Wi-Fi ${fmt(tw)}   ")
                         withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
-                        append("モバイル ${fmtD(aM)}")
+                        append("${tl("モバイル", "Mobile")} ${fmt(tm)}")
                     },
                     fontSize = 13.sp, color = cs.onSurfaceVariant
                 )
-                InfoRow("1日あたり平均", fmt((tw + tm) / maxOf(1, rows.size)))
+                InfoRow(tl("1日あたり平均", "Daily average"), fmt((tw + tm) / maxOf(1, rows.size)))
                 InfoRow(
-                    "最も多かった日",
-                    if (maxDay != null && maxDay.wifi + maxDay.mobile > 0) "${maxDay.label}  ${fmt(maxDay.wifi + maxDay.mobile)}" else "-"
+                    tl("最も多かった日", "Busiest day"),
+                    if (maxDay != null && maxDay.wifi + maxDay.mobile > 0)
+                        "${rf.format(Date(maxDay.ms))}  ${fmt(maxDay.wifi + maxDay.mobile)}"
+                    else "-"
                 )
-                InfoRow("画面使用時間", if (tf > 0) fmtTime(tf) else "-")
+                InfoRow(tl("画面使用時間", "Screen time"), if (tf > 0) fmtTime(tf) else "-")
                 Text(
-                    "※ 画面使用時間はOSの仕様上、直近約7日分のみ集計されます。",
+                    tl(
+                        "※ 画面使用時間はOSの仕様上、直近約7日分のみ集計されます。",
+                        "Note: Android only keeps screen time for about the last 7 days."
+                    ),
                     fontSize = 11.sp, color = cs.onSurfaceVariant
                 )
             }
         }
         if (chart.isNotEmpty()) item { DayChart(chart, if (n <= 7) 1 else 2) }
         item {
-            GSection("保存済み期間の累計") {
-                Text(fmtD(aSaved), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            GSection(tl("保存済み期間の累計", "Saved total")) {
+                Text(fmt(sw + sm), fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Wi-Fi ${fmt(sw)} / モバイル ${fmt(sm)}（前日までの保存データ分）",
+                    tl(
+                        "Wi-Fi ${fmt(sw)} / モバイル ${fmt(sm)}（前日までの保存データ分）",
+                        "Wi-Fi ${fmt(sw)} / Mobile ${fmt(sm)} (saved data up to yesterday)"
+                    ),
                     fontSize = 12.sp, color = cs.onSurfaceVariant
                 )
             }
@@ -398,15 +461,17 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.pkg}"))
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     )
-                }) { Text("アプリ情報を開く") }
+                }) { Text(tl("アプリ情報を開く", "Open app info")) }
                 Button(onClick = {
                     val li = pm.getLaunchIntentForPackage(app.pkg)
                     if (li != null) ctx.startActivity(li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    else Toast.makeText(ctx, "このアプリは起動できません", Toast.LENGTH_SHORT).show()
-                }) { Text("起動") }
+                    else Toast.makeText(
+                        ctx, tl("このアプリは起動できません", "This app can't be launched."), Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text(tl("起動", "Launch")) }
             }
         }
-        item { Text("日別の内訳", fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
+        item { Text(tl("日別の内訳", "Daily breakdown"), fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
         items(rows.filter { it.wifi + it.mobile > 0 || it.fgMs > 0 }.reversed(), key = { it.ms }) { r ->
             Glass(Modifier.fillMaxWidth(), radius = 16.dp) {
                 Row(
@@ -415,7 +480,7 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(r.label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text(rf.format(Date(r.ms)), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         Text(
                             buildAnnotatedString {
                                 withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
