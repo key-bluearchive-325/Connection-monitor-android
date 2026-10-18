@@ -4,10 +4,10 @@ on:
     inputs:
       app_name:
         description: アプリ名
-        default: DataUsage
+        default: データ通信量
       package_name:
         description: パッケージ名（英小文字・数字・ドット）
-        default: app.hatent.datausage
+        default: com.example.datausage
   push:
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
         run: |
           D=app/src/main
           mkdir -p $D/java/com/example/datausage $D/res/values $D/res/drawable $D/res/mipmap-anydpi-v26
-          cp K1.kt K2.kt K3.kt K4.kt $D/java/com/example/datausage/
+          cp K1.kt K2.kt K3.kt K4.kt K5.kt $D/java/com/example/datausage/
           base64 -d > app/debug.keystore <<'EOF'
           /u3+7QAAAAIAAAABAAAAAQAPYW5kcm9pZGRlYnVna2V5AAABoUqw2ToAAAT+MIIE+jAMBgorBgEE
           ASoCEQEBBIIE6PlAOMhC1HMWhwcrrQT8E6zLIcVo4fGojrWYQjlxXAyNSPTisFQ7HSV5l0PLj9RP
@@ -98,8 +98,8 @@ jobs:
                   applicationId = "PKG_HERE"
                   minSdk = 29
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "1.4"
+                  versionCode = 6
+                  versionName = "1.5"
               }
               signingConfigs {
                   getByName("debug") {
@@ -119,6 +119,8 @@ jobs:
           dependencies {
               implementation(platform("androidx.compose:compose-bom:2024.09.00"))
               implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.foundation:foundation")
+              implementation("androidx.compose.animation:animation")
               implementation("androidx.compose.material3:material3")
               implementation("androidx.activity:activity-compose:1.9.2")
               implementation("androidx.core:core-ktx:1.13.1")
@@ -150,6 +152,10 @@ jobs:
             echo '<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">'
             echo '<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>'
             echo '<uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission"/>'
+            echo '<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>'
+            echo '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>'
+            echo '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'
+            echo '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>'
             echo '<application android:icon="@mipmap/ic_1" android:label="@string/app_name" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">'
             echo '<activity android:name=".MainActivity" android:exported="true" android:icon="@mipmap/ic_1" android:label="@string/app_name"/>'
             for n in 1 2 3 4; do
@@ -157,6 +163,8 @@ jobs:
               if [ $n = 1 ]; then en=true; lab="@string/app_name"; fi
               echo "<activity-alias android:name=\".Alias$n\" android:targetActivity=\".MainActivity\" android:exported=\"true\" android:enabled=\"$en\" android:icon=\"@mipmap/ic_$n\" android:label=\"$lab\"><intent-filter><action android:name=\"android.intent.action.MAIN\"/><category android:name=\"android.intent.category.LAUNCHER\"/></intent-filter></activity-alias>"
             done
+            echo '<service android:name=".SpeedService" android:exported="false" android:foregroundServiceType="specialUse"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="network_speed_monitor"/></service>'
+            echo '<receiver android:name=".BootReceiver" android:exported="true"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter></receiver>'
             echo '</application></manifest>'
           } > $D/AndroidManifest.xml
       - run: gradle assembleDebug --no-daemon
