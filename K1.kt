@@ -14,11 +14,17 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.drawable.Icon
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Process
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -31,6 +37,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -44,7 +52,26 @@ val MobileColor = Color(0xFFFFB74D)
 
 object Ui {
     var accent by mutableIntStateOf(0)
-    var mode by mutableIntStateOf(0) // 0=自動 1=ライト 2=ダーク 3=AMOLED
+    var mode by mutableIntStateOf(0)    // 0=自動 1=ライト 2=ダーク 3=AMOLED
+    var palette by mutableIntStateOf(0) // 0=標準 1=Material You 2=モノクロ
+    var mult by mutableFloatStateOf(1f) // 速度表示の倍率（見かけだけ）
+}
+
+data class Pal(
+    val ac: Color, val ac2: Color,
+    val hdr1: Color, val hdr2: Color,
+    val blobs: List<Color>,
+    val wifi: Color, val mobile: Color
+) {
+    val onHdr: Color
+        get() = if ((hdr1.luminance() + hdr2.luminance()) / 2f > 0.45f) Color.Black else Color.White
+}
+
+val LocalPal = compositionLocalOf {
+    Pal(
+        Color(0xFF5B6CFF), Color(0xFF9B5CFF), Color(0xFF5B6CFF), Color(0xFF9B5CFF),
+        listOf(Color(0xFF5B6CFF), Color(0xFF9B5CFF), Color(0xFF0EA5A4)), WifiColor, MobileColor
+    )
 }
 
 class MainActivity : ComponentActivity() {
@@ -53,42 +80,100 @@ class MainActivity : ComponentActivity() {
         val p = getSharedPreferences("s", 0)
         Ui.accent = p.getInt("accent", 0).coerceIn(0, ACCENTS.size - 1)
         Ui.mode = p.getInt("mode", 0)
+        Ui.palette = p.getInt("palette", 0)
+        Ui.mult = p.getFloat("mult", 1f)
         applyRefreshRate(this, p.getBoolean("hz", true))
+        if (p.getBoolean("notif", false)) {
+            runCatching { startForegroundService(Intent(this, SpeedService::class.java)) }
+        }
         setContent { AppTheme { Root() } }
     }
 }
 
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
+    val ctx = LocalContext.current
     val amoled = Ui.mode == 3
     val dark = amoled || when (Ui.mode) { 1 -> false; 2 -> true; else -> isSystemInDarkTheme() }
-    val ac = Color(ACCENTS[Ui.accent])
-    val cs = if (dark) darkColorScheme(
-        primary = ac, onPrimary = Color.White,
-        background = if (amoled) Color.Black else Color(0xFF0B0D14),
-        surface = if (amoled) Color.Black else Color(0xFF171B24),
-        onBackground = Color(0xFFF1F3F9), onSurface = Color(0xFFF1F3F9),
-        onSurfaceVariant = Color(0xFFB4BBCC), surfaceVariant = Color(0x1FFFFFFF)
-    ) else lightColorScheme(
-        primary = ac, onPrimary = Color.White,
-        background = Color(0xFFEEF1FA), surface = Color.White,
-        onBackground = Color(0xFF14171F), onSurface = Color(0xFF14171F),
-        onSurfaceVariant = Color(0xFF5E667A), surfaceVariant = Color(0x14000000)
-    )
+    val tr = if (dark) Color(0x1FFFFFFF) else Color(0x14000000)
+    val bgc = if (amoled) Color.Black else if (dark) Color(0xFF0B0D14) else Color(0xFFEEF1FA)
     val n = ACCENTS.size
-    val blobs = listOf(ac, Color(ACCENTS[(Ui.accent + 2) % n]), Color(ACCENTS[(Ui.accent + 4) % n]))
+    val a = Color(ACCENTS[Ui.accent])
+    val a2 = Color(ACCENTS[(Ui.accent + 1) % n])
+    val textMain = if (dark) Color(0xFFF1F3F9) else Color(0xFF14171F)
+    val textSub = if (dark) Color(0xFFB4BBCC) else Color(0xFF5E667A)
+
+    val (cs, pal) = when {
+        Ui.palette == 1 && Build.VERSION.SDK_INT >= 31 -> {
+            val b = if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+            val c = b.copy(
+                background = if (amoled) Color.Black else b.background,
+                surface = if (amoled) Color.Black else b.surface,
+                surfaceVariant = tr
+            )
+            c to Pal(
+                c.primary, c.tertiary, c.primaryContainer, c.tertiaryContainer,
+                listOf(c.primary, c.tertiary, c.secondary), c.primary, c.tertiary
+            )
+        }
+        Ui.palette == 2 -> {
+            val hi = if (dark) Color(0xFFEDEDED) else Color(0xFF222222)
+            val lo = if (dark) Color(0xFF9A9A9A) else Color(0xFF6A6A6A)
+            val c = if (dark) darkColorScheme(
+                primary = hi, onPrimary = Color.Black, background = bgc, surface = bgc,
+                onBackground = textMain, onSurface = textMain,
+                onSurfaceVariant = textSub, surfaceVariant = tr
+            ) else lightColorScheme(
+                primary = hi, onPrimary = Color.White, background = bgc, surface = bgc,
+                onBackground = textMain, onSurface = textMain,
+                onSurfaceVariant = textSub, surfaceVariant = tr
+            )
+            c to Pal(
+                hi, lo,
+                if (dark) Color(0xFF4A4A4A) else Color(0xFF2B2B2B),
+                if (dark) Color(0xFF262626) else Color(0xFF555555),
+                listOf(
+                    Color(0xFF9A9A9A).copy(alpha = 0.5f),
+                    Color(0xFFBBBBBB).copy(alpha = 0.5f),
+                    Color(0xFF777777).copy(alpha = 0.5f)
+                ),
+                if (dark) Color(0xFFEDEDED) else Color(0xFF3A3A3A),
+                if (dark) Color(0xFF8A8A8A) else Color(0xFF9A9A9A)
+            )
+        }
+        else -> {
+            val c = if (dark) darkColorScheme(
+                primary = a, onPrimary = Color.White, background = bgc,
+                surface = if (amoled) Color.Black else Color(0xFF171B24),
+                onBackground = textMain, onSurface = textMain,
+                onSurfaceVariant = textSub, surfaceVariant = tr
+            ) else lightColorScheme(
+                primary = a, onPrimary = Color.White, background = bgc, surface = Color.White,
+                onBackground = textMain, onSurface = textMain,
+                onSurfaceVariant = textSub, surfaceVariant = tr
+            )
+            c to Pal(
+                a, a2, a, a2,
+                listOf(a, Color(ACCENTS[(Ui.accent + 2) % n]), Color(ACCENTS[(Ui.accent + 4) % n])),
+                WifiColor, MobileColor
+            )
+        }
+    }
+
     MaterialTheme(colorScheme = cs) {
-        GlassBackground(dark, amoled, blobs) {
-            Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = cs.onSurface, content = content)
+        CompositionLocalProvider(LocalPal provides pal) {
+            GlassBackground(dark, amoled, cs.background, pal.blobs) {
+                Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = cs.onSurface, content = content)
+            }
         }
     }
 }
 
 @Composable
-fun GlassBackground(dark: Boolean, amoled: Boolean, blobs: List<Color>, content: @Composable () -> Unit) {
+fun GlassBackground(dark: Boolean, amoled: Boolean, base: Color, blobs: List<Color>, content: @Composable () -> Unit) {
     Box(
         Modifier.fillMaxSize()
-            .background(if (amoled) Color.Black else if (dark) Color(0xFF0B0D14) else Color(0xFFEEF1FA))
+            .background(base)
             .drawBehind {
                 if (amoled) return@drawBehind
                 val a = if (dark) 0.50f else 0.42f
@@ -96,7 +181,7 @@ fun GlassBackground(dark: Boolean, amoled: Boolean, blobs: List<Color>, content:
                 val h = size.height
                 fun blob(c: Color, x: Float, y: Float, r: Float) {
                     val o = Offset(x, y)
-                    drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), o, r), r, o)
+                    drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a * c.alpha), Color.Transparent), o, r), r, o)
                 }
                 blob(blobs[0], w * 0.1f, h * 0.08f, w * 0.95f)
                 blob(blobs[1], w * 1.0f, h * 0.42f, w * 0.85f)
@@ -137,21 +222,35 @@ fun Glass(
 @Composable
 fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
     val dark = MaterialTheme.colorScheme.onSurface.luminance() > 0.5f
-    val ac = Color(ACCENTS[Ui.accent])
+    val ac = LocalPal.current.ac
     val shape = RoundedCornerShape(50)
+    val bg by animateColorAsState(
+        if (selected) ac.copy(alpha = 0.9f) else Color.White.copy(alpha = if (dark) 0.10f else 0.5f),
+        tween(250), label = "pill"
+    )
+    val fg by animateColorAsState(
+        if (selected) (if (ac.luminance() > 0.55f) Color.Black else Color.White) else MaterialTheme.colorScheme.onSurface,
+        tween(250), label = "pillfg"
+    )
     Box(
         Modifier.clip(shape)
-            .background(if (selected) ac.copy(alpha = 0.9f) else Color.White.copy(alpha = if (dark) 0.10f else 0.5f))
+            .background(bg)
             .border(1.dp, Color.White.copy(alpha = if (dark) 0.25f else 0.8f), shape)
             .clickable { onClick() }
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        Text(
-            text,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
-        )
+        Text(text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, color = fg)
     }
+}
+
+/** 右にスワイプで戻る */
+fun Modifier.swipeBack(onBack: () -> Unit): Modifier = pointerInput(Unit) {
+    var total = 0f
+    detectHorizontalDragGestures(
+        onDragStart = { total = 0f },
+        onDragEnd = { if (total > 200f) onBack() },
+        onDragCancel = { total = 0f }
+    ) { _, d -> total += d }
 }
 
 data class AppUsage(
@@ -192,11 +291,22 @@ fun hasUsageAccess(ctx: Context): Boolean {
 }
 
 /** 小数点2桁（例: 4.54MB） */
-fun fmt(b: Long): String = when {
-    b >= 1L shl 30 -> String.format(Locale.US, "%.2fGB", b / (1L shl 30).toDouble())
-    b >= 1L shl 20 -> String.format(Locale.US, "%.2fMB", b / (1L shl 20).toDouble())
-    b >= 1L shl 10 -> String.format(Locale.US, "%.2fKB", b / 1024.0)
-    else -> "${b}B"
+fun fmtD(b: Double): String = when {
+    b >= 1073741824.0 -> String.format(Locale.US, "%.2fGB", b / 1073741824.0)
+    b >= 1048576.0 -> String.format(Locale.US, "%.2fMB", b / 1048576.0)
+    b >= 1024.0 -> String.format(Locale.US, "%.2fKB", b / 1024.0)
+    else -> String.format(Locale.US, "%.0fB", b)
+}
+
+fun fmt(b: Long): String = fmtD(b.toDouble())
+
+fun multLabel(m: Float): String = if (m >= 1f) m.toInt().toString() else m.toString()
+
+/** 数字をなめらかに動かす */
+@Composable
+fun animBytes(v: Double): Double {
+    val a by animateFloatAsState(v.toFloat(), tween(600, easing = FastOutSlowInEasing), label = "num")
+    return a.toDouble()
 }
 
 fun fmtTime(ms: Long): String {
