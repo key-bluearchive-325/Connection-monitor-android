@@ -29,16 +29,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import java.util.Locale
@@ -55,6 +51,8 @@ object Ui {
     var palette by mutableIntStateOf(0) // 0=標準 1=Material You 2=モノクロ
     var mult by mutableFloatStateOf(1f) // 速度表示の倍率（見かけだけ）
     var lang by mutableIntStateOf(0)    // 0=自動 1=日本語 2=English (UK)
+    var fx by mutableIntStateOf(1)      // ガラス表現 0=軽量 1=標準 2=高品質
+    var ripple by mutableStateOf(true)  // タッチで波紋
 }
 
 fun isJa(): Boolean = when (Ui.lang) {
@@ -108,6 +106,8 @@ class MainActivity : ComponentActivity() {
         Ui.palette = p.getInt("palette", 0)
         Ui.mult = p.getFloat("mult", 1f)
         Ui.lang = p.getInt("lang", 0)
+        Ui.fx = p.getInt("fx", 1).coerceIn(0, 2)
+        Ui.ripple = p.getBoolean("ripple", true)
         applyRefreshRate(this, p.getBoolean("hz", true))
         if (p.getBoolean("notif", false)) {
             runCatching { startForegroundService(Intent(this, SpeedService::class.java)) }
@@ -205,61 +205,11 @@ fun AppTheme(content: @Composable () -> Unit) {
     }
 }
 
-@Composable
-fun GlassBackground(dark: Boolean, amoled: Boolean, base: Color, blobs: List<Color>, content: @Composable () -> Unit) {
-    Box(
-        Modifier.fillMaxSize()
-            .background(base)
-            .drawBehind {
-                if (amoled) return@drawBehind
-                val a = if (dark) 0.50f else 0.42f
-                val w = size.width
-                val h = size.height
-                fun blob(c: Color, x: Float, y: Float, r: Float) {
-                    val o = Offset(x, y)
-                    drawCircle(Brush.radialGradient(listOf(c.copy(alpha = a * c.alpha), Color.Transparent), o, r), r, o)
-                }
-                blob(blobs[0], w * 0.1f, h * 0.08f, w * 0.95f)
-                blob(blobs[1], w * 1.0f, h * 0.42f, w * 0.85f)
-                blob(blobs[2], w * 0.1f, h * 0.9f, w * 0.95f)
-            }
-    ) { content() }
-}
-
 /** 画面の上下（時計・ナビゲーションバー）に被らないための余白 */
 @Composable
 fun pagePadding(): PaddingValues {
     val sd = WindowInsets.safeDrawing.asPaddingValues()
     return PaddingValues(16.dp, sd.calculateTopPadding() + 16.dp, 16.dp, sd.calculateBottomPadding() + 16.dp)
-}
-
-@Composable
-fun Glass(
-    modifier: Modifier = Modifier,
-    radius: Dp = 28.dp,
-    onClick: (() -> Unit)? = null,
-    content: @Composable () -> Unit
-) {
-    val amoled = Ui.mode == 3
-    val dark = MaterialTheme.colorScheme.onSurface.luminance() > 0.5f
-    val shape = RoundedCornerShape(radius)
-    val rim = Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = if (dark) 0.40f else 0.95f),
-            Color.White.copy(alpha = 0.04f),
-            Color.White.copy(alpha = if (dark) 0.18f else 0.60f)
-        )
-    )
-    val sheen = Brush.verticalGradient(
-        listOf(Color.White.copy(alpha = if (amoled) 0.07f else if (dark) 0.14f else 0.45f), Color.Transparent)
-    )
-    Box(
-        modifier.clip(shape)
-            .background(Color.White.copy(alpha = if (amoled) 0.06f else if (dark) 0.07f else 0.40f))
-            .background(sheen)
-            .border(1.dp, rim, shape)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-    ) { content() }
 }
 
 @Composable
@@ -319,7 +269,13 @@ data class AppUsage(
 }
 
 data class DayTotal(val ms: Long, val wifi: Long, val mobile: Long)
-data class Roll(val w7: Long = 0, val m7: Long = 0, val w30: Long = 0, val m30: Long = 0)
+data class Sum(val w: Long = 0, val m: Long = 0) {
+    val t get() = w + m
+}
+data class Roll(
+    val d7: Sum = Sum(), val d30: Sum = Sum(),
+    val today: Sum = Sum(), val week: Sum = Sum(), val month: Sum = Sum()
+)
 data class Loaded(
     val apps: List<AppUsage> = emptyList(),
     val days: List<DayTotal> = emptyList(),
