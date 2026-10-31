@@ -16,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -100,7 +99,7 @@ fun UsageScreen() {
             withContext(Dispatchers.IO) { runCatching { loadAll(ctx, mode, offset) }.getOrNull() }
                 ?.let { data = it }
             batt = readBattery(ctx)
-            if (offset < 0) break
+            if (offset < 0 && tick > 0) break
             delay(3000)
         }
     }
@@ -250,67 +249,66 @@ fun Stat(label: String, value: String, fg: Color) {
 fun Header(speed: Pair<Long, Long>, list: List<AppUsage>, batt: Batt, onSettings: () -> Unit) {
     val pal = LocalPal.current
     val fg = pal.onHdr
-    val shape = RoundedCornerShape(32.dp)
     val m = Ui.mult.toDouble()
-    Box(
-        Modifier.fillMaxWidth().clip(shape)
-            .background(Brush.linearGradient(listOf(pal.hdr1.copy(alpha = 0.92f), pal.hdr2.copy(alpha = 0.88f))))
-            .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.22f), Color.Transparent)))
-            .border(
-                1.dp,
-                Brush.linearGradient(listOf(Color.White.copy(alpha = 0.7f), Color.White.copy(alpha = 0.05f))),
-                shape
-            )
-            .padding(20.dp)
+    Glass(
+        Modifier.fillMaxWidth(), radius = 32.dp,
+        tint = listOf(pal.hdr1.copy(alpha = 0.86f), pal.hdr2.copy(alpha = 0.80f))
     ) {
-        Text(
-            "⚙", fontSize = 22.sp, color = fg,
-            modifier = Modifier.align(Alignment.TopEnd).clickable { onSettings() }.padding(4.dp)
-        )
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(tl("リアルタイム速度", "Live speed"), color = fg.copy(alpha = 0.8f), fontSize = 12.sp)
-                if (Ui.mult != 1f) {
-                    Text(
-                        tl("  見かけ ×${multLabel(Ui.mult)}", "  Display ×${multLabel(Ui.mult)}"),
-                        color = fg.copy(alpha = 0.8f), fontSize = 11.sp
-                    )
-                }
-            }
-            Text("↓ ${fmtD(speed.first * m)}/s", color = fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("↑ ${fmtD(speed.second * m)}/s", color = fg.copy(alpha = 0.9f), fontSize = 16.sp)
-            Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Stat(tl("この期間の合計", "Total this period"), fmt(list.sumOf { it.total }), fg)
-                Stat("Wi-Fi", fmt(list.sumOf { it.wifi }), fg)
-                Stat(tl("モバイル", "Mobile"), fmt(list.sumOf { it.mobile }), fg)
-            }
-            Spacer(Modifier.height(16.dp))
+        Box(Modifier.padding(20.dp)) {
             Text(
-                "🔋 ${batt.pct}%" +
-                    (if (batt.charging) tl(" ⚡充電中", " ⚡ Charging") else "") +
-                    tl("  ・  ", "  ·  ") + "🌡 ${"%.1f".format(batt.tempC)}°C",
-                color = fg.copy(alpha = 0.9f), fontSize = 13.sp
+                "⚙", fontSize = 22.sp, color = fg,
+                modifier = Modifier.align(Alignment.TopEnd).clickable { onSettings() }.padding(4.dp)
             )
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(tl("リアルタイム速度", "Live speed"), color = fg.copy(alpha = 0.8f), fontSize = 12.sp)
+                    if (Ui.mult != 1f) {
+                        Text(
+                            tl("  見かけ ×${multLabel(Ui.mult)}", "  Display ×${multLabel(Ui.mult)}"),
+                            color = fg.copy(alpha = 0.8f), fontSize = 11.sp
+                        )
+                    }
+                }
+                Text("↓ ${fmtD(speed.first * m)}/s", color = fg, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text("↑ ${fmtD(speed.second * m)}/s", color = fg.copy(alpha = 0.9f), fontSize = 16.sp)
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Stat(tl("この期間の合計", "Total this period"), fmt(list.sumOf { it.total }), fg)
+                    Stat("Wi-Fi", fmt(list.sumOf { it.wifi }), fg)
+                    Stat(tl("モバイル", "Mobile"), fmt(list.sumOf { it.mobile }), fg)
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "🔋 ${batt.pct}%" +
+                        (if (batt.charging) tl(" ⚡充電中", " ⚡ Charging") else "") +
+                        tl("  ・  ", "  ·  ") + "🌡 ${"%.1f".format(batt.tempC)}°C",
+                    color = fg.copy(alpha = 0.9f), fontSize = 13.sp
+                )
+            }
         }
     }
 }
 
 @Composable
-fun SumCol(label: String, w: Long, m: Long, modifier: Modifier) {
+fun SumCol(label: String, s: Sum, big: Boolean, modifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     val pal = LocalPal.current
     Column(modifier) {
-        Text(label, fontSize = 12.sp, color = cs.onSurfaceVariant)
-        Text(fmt(w + m), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(label, fontSize = 11.sp, color = cs.onSurfaceVariant, maxLines = 1)
+        Text(fmt(s.t), fontSize = if (big) 18.sp else 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         Text(
             buildAnnotatedString {
                 withStyle(SpanStyle(color = pal.wifi)) { append("● ") }
-                append("${fmt(w)}  ")
-                withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
-                append(fmt(m))
+                append(fmt(s.w))
             },
-            fontSize = 11.sp, color = cs.onSurfaceVariant
+            fontSize = 10.sp, color = cs.onSurfaceVariant, maxLines = 1
+        )
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = pal.mobile)) { append("● ") }
+                append(fmt(s.m))
+            },
+            fontSize = 10.sp, color = cs.onSurfaceVariant, maxLines = 1
         )
     }
 }
@@ -319,11 +317,23 @@ fun SumCol(label: String, w: Long, m: Long, modifier: Modifier) {
 fun SummaryCard(r: Roll) {
     val cs = MaterialTheme.colorScheme
     Glass(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            SumCol(tl("直近7日の合計", "Last 7 days"), r.w7, r.m7, Modifier.weight(1f))
-            Box(Modifier.width(1.dp).height(56.dp).background(cs.onSurface.copy(alpha = 0.15f)))
-            Spacer(Modifier.width(16.dp))
-            SumCol(tl("直近30日の合計", "Last 30 days"), r.w30, r.m30, Modifier.weight(1f))
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tl("合計使用量", "Total usage"), fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SumCol(tl("今日", "Today"), r.today, true, Modifier.weight(1f))
+                SumCol(tl("今週", "This week"), r.week, true, Modifier.weight(1f))
+                SumCol(tl("今月", "This month"), r.month, true, Modifier.weight(1f))
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(cs.onSurface.copy(alpha = 0.12f)))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SumCol(tl("直近7日", "Last 7 days"), r.d7, false, Modifier.weight(1f))
+                SumCol(tl("直近30日", "Last 30 days"), r.d30, false, Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
+            }
+            Text(
+                tl("週は月曜始まりです。", "Weeks start on Monday."),
+                fontSize = 10.sp, color = cs.onSurfaceVariant
+            )
         }
     }
 }
@@ -379,7 +389,7 @@ fun AppRow(a: AppUsage, max: Float, modifier: Modifier = Modifier, onClick: () -
     val cs = MaterialTheme.colorScheme
     val pal = LocalPal.current
     val frac by animateFloatAsState((a.total / max).coerceIn(0f, 1f), tween(500), label = "frac")
-    Glass(modifier.fillMaxWidth(), radius = 24.dp, onClick = onClick) {
+    Glass(modifier.fillMaxWidth(), radius = 24.dp, big = false, onClick = onClick) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             if (a.icon != null) {
                 Image(a.icon, null, Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)))
