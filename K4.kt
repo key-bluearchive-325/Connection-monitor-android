@@ -96,6 +96,10 @@ fun SettingsScreen(onBack: () -> Unit) {
         Ui.lang = i
         prefs.edit().putInt("lang", i).apply()
     }
+    val setFx = { i: Int ->
+        Ui.fx = i
+        prefs.edit().putInt("fx", i).apply()
+    }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         notif = ok
         if (ok) setSpeedNotif(ctx, true)
@@ -128,6 +132,54 @@ fun SettingsScreen(onBack: () -> Unit) {
                         "Auto uses Japanese when your device language is Japanese, and British English otherwise."
                     ),
                     fontSize = 12.sp, color = cs.onSurfaceVariant
+                )
+            }
+        }
+        item {
+            GSection(tl("ガラス表現と波紋", "Glass effects & ripples")) {
+                PillRows(
+                    listOf(tl("軽量", "Light"), tl("標準", "Standard"), tl("高品質", "High")),
+                    Ui.fx, 3
+                ) { setFx(it) }
+                Text(
+                    when (Ui.fx) {
+                        0 -> tl(
+                            "ぼかしと動く背景をオフにします。いちばん軽く動きます。",
+                            "Blur and the moving background are off. Lightest on battery."
+                        )
+                        1 -> tl(
+                            "大きなカードの背面をぼかし、背景の光がゆっくり流れます。",
+                            "Blurs behind the large cards, and the background lights drift gently."
+                        )
+                        else -> tl(
+                            "すべてのカードの背面をぼかします。端末の負荷とバッテリー消費が増えます。",
+                            "Blurs behind every card. Uses more GPU and battery."
+                        )
+                    },
+                    fontSize = 12.sp, color = cs.onSurfaceVariant
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(tl("タッチで波紋", "Touch ripples"))
+                        Text(
+                            tl(
+                                "触れた場所から波紋が広がります。Android 13以降は画面全体が水面のように揺らぎ、12以下は光の輪で表現します。",
+                                "Ripples spread from where you touch. On Android 13+ the whole screen wobbles like water; on 12 and below you get light rings."
+                            ),
+                            fontSize = 12.sp, color = cs.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = Ui.ripple, onCheckedChange = { v ->
+                        Ui.ripple = v
+                        prefs.edit().putBoolean("ripple", v).apply()
+                    })
+                }
+                Text(
+                    tl(
+                        "※ 背面のぼかしはAndroid 12以降で動作します。",
+                        "Note: background blur works on Android 12 or later."
+                    ),
+                    fontSize = 11.sp, color = cs.onSurfaceVariant
                 )
             }
         }
@@ -473,7 +525,7 @@ fun AppDetailScreen(app: AppUsage, onBack: () -> Unit) {
         }
         item { Text(tl("日別の内訳", "Daily breakdown"), fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
         items(rows.filter { it.wifi + it.mobile > 0 || it.fgMs > 0 }.reversed(), key = { it.ms }) { r ->
-            Glass(Modifier.fillMaxWidth(), radius = 16.dp) {
+            Glass(Modifier.fillMaxWidth(), radius = 16.dp, big = false) {
                 Row(
                     Modifier.fillMaxWidth().padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
