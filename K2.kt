@@ -224,18 +224,29 @@ fun loadAll(ctx: Context, mode: Int, offset: Int): Loaded {
         AppUsage(label, pkg, a[0], a[1], a[2], iconOf(ctx, pkg))
     }
 
-    // 直近7日 / 30日の合計（今日を含む）
+    // 今日 / 今週 / 今月 と 直近7日 / 30日 の合計
     val now = System.currentTimeMillis()
-    val r = dayMaps(ctx, addDays(startOfDay(now), -29), now, false)
-    var w7 = 0L; var m7 = 0L; var w30 = 0L; var m30 = 0L
-    r.forEachIndexed { i, p ->
+    val today0 = startOfDay(now)
+    val weekStart = rangeOf(1, 0).first
+    val monthStart = rangeOf(2, 0).first
+    val from = minOf(addDays(today0, -29), monthStart, weekStart)
+    val r = dayMaps(ctx, from, now, false)
+    fun sumFrom(s: Long): Sum {
         var w = 0L
         var mo = 0L
-        for (a in p.second.values) { w += a[0]; mo += a[1] }
-        w30 += w; m30 += mo
-        if (i >= r.size - 7) { w7 += w; m7 += mo }
+        for ((ms, m) in r) {
+            if (ms >= s) for (a in m.values) { w += a[0]; mo += a[1] }
+        }
+        return Sum(w, mo)
     }
-    return Loaded(apps, chart, Roll(w7, m7, w30, m30))
+    val roll = Roll(
+        d7 = sumFrom(addDays(today0, -6)),
+        d30 = sumFrom(addDays(today0, -29)),
+        today = sumFrom(today0),
+        week = sumFrom(weekStart),
+        month = sumFrom(monthStart)
+    )
+    return Loaded(apps, chart, roll)
 }
 
 // ---------- アプリ詳細用 ----------
